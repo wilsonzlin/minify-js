@@ -452,10 +452,10 @@ fn emit_js_under_operator<T: Write>(
                 };
                 match e {
                     ArrayElement::Single(expr) => {
-                        out.write_all(b"...")?;
                         emit_js(out, expr)?;
                     }
                     ArrayElement::Rest(expr) => {
+                        out.write_all(b"...")?;
                         emit_js(out, expr)?;
                     }
                     ArrayElement::Empty => {}
