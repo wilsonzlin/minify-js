@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use crate::source::{Source, SourceRange};
 
@@ -15,7 +14,7 @@ struct SymbolData {
 
 #[derive(Clone)]
 pub struct Symbol {
-    data: Arc<SymbolData>,
+    data: Rc<SymbolData>,
 }
 
 #[derive(Clone)]

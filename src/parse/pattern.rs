@@ -1,7 +1,7 @@
 use crate::ast::{
     ArrayPatternElement, ClassOrObjectMemberKey, Node, ObjectPatternProperty, Syntax,
 };
-use crate::error::{TsErrorType, TsResult};
+use crate::error::{SyntaxErrorType, TsResult};
 use crate::parse::expr::parse_expr_until_either;
 use crate::parse::literal::parse_class_or_object_member_key;
 use crate::parse::parser::Parser;
@@ -34,7 +34,7 @@ pub fn parse_pattern(parser: &mut Parser) -> TsResult<Node> {
                     Some(parse_pattern(parser)?)
                 } else {
                     if let ClassOrObjectMemberKey::Computed(name) = key {
-                        return Err(name.error(TsErrorType::ExpectedSyntax(
+                        return Err(name.error(SyntaxErrorType::ExpectedSyntax(
                             "object pattern property subpattern",
                         )));
                     };
@@ -108,6 +108,6 @@ pub fn parse_pattern(parser: &mut Parser) -> TsResult<Node> {
                 Syntax::ArrayPattern { elements, rest },
             )
         }
-        _ => return Err(t.error(TsErrorType::ExpectedSyntax("pattern"))),
+        _ => return Err(t.error(SyntaxErrorType::ExpectedSyntax("pattern"))),
     })
 }

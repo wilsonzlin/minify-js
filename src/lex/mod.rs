@@ -9,10 +9,9 @@ use crate::char::{
     CharFilter, DIGIT, DIGIT_BIN, DIGIT_HEX, DIGIT_OCT, ID_CONTINUE,
     ID_CONTINUE_OR_PARENTHESIS_CLOSE_OR_BRACKET_CLOSE, ID_START_CHARSTR, WHITESPACE,
 };
-use crate::error::{TsError, TsErrorType, TsResult};
+use crate::error::{SyntaxError, SyntaxErrorType, TsResult};
 use crate::source::{Source, SourceRange};
 use crate::token::{Token, TokenType};
-use std::path::{Path, PathBuf};
 
 #[cfg(test)]
 mod tests;
@@ -56,9 +55,9 @@ pub struct Lexer {
 }
 
 impl Lexer {
-    pub fn new(name: PathBuf, code: Vec<u8>) -> Lexer {
+    pub fn new(code: Vec<u8>) -> Lexer {
         Lexer {
-            source: Source::new(name, code),
+            source: Source::new(code),
             next: 0,
         }
     }
@@ -69,10 +68,6 @@ impl Lexer {
 
     fn remaining(&self) -> usize {
         self.end() - self.next
-    }
-
-    pub fn source_path(&self) -> &Path {
-        self.source.path()
     }
 
     pub fn source_range(&self) -> SourceRange {
@@ -91,8 +86,8 @@ impl Lexer {
         }
     }
 
-    fn error(&self, typ: TsErrorType) -> TsError {
-        TsError::new(typ, self.source.clone(), self.next)
+    fn error(&self, typ: SyntaxErrorType) -> SyntaxError {
+        SyntaxError::new(typ, self.next)
     }
 
     fn at_end(&self) -> bool {
@@ -110,7 +105,7 @@ impl Lexer {
 
     fn peek(&self, n: usize) -> TsResult<u8> {
         self.peek_or_eof(n)
-            .ok_or_else(|| self.error(TsErrorType::UnexpectedEnd))
+            .ok_or_else(|| self.error(SyntaxErrorType::UnexpectedEnd))
     }
 
     fn peek_or_eof(&self, n: usize) -> Option<u8> {
@@ -119,7 +114,7 @@ impl Lexer {
 
     fn consume_next_char(&mut self) -> TsResult<(SourceRange, u8)> {
         if self.at_end() {
-            Err(self.error(TsErrorType::UnexpectedEnd))
+            Err(self.error(SyntaxErrorType::UnexpectedEnd))
         } else {
             let c = self.source.code()[self.next];
             let r = SourceRange {
@@ -150,7 +145,7 @@ impl Lexer {
 
     fn n(&self, n: usize) -> TsResult<Match> {
         if self.next + n > self.end() {
-            return Err(self.error(TsErrorType::UnexpectedEnd));
+            return Err(self.error(SyntaxErrorType::UnexpectedEnd));
         };
         Ok(Match { len: n })
     }
@@ -164,7 +159,7 @@ impl Lexer {
     fn through_char(&self, c: u8) -> TsResult<Match> {
         memchr(c, &self.source.code()[self.next..])
             .map(|pos| Match { len: pos + 1 })
-            .ok_or_else(|| self.error(TsErrorType::UnexpectedEnd))
+            .ok_or_else(|| self.error(SyntaxErrorType::UnexpectedEnd))
     }
 
     fn while_not_2_chars(&self, a: u8, b: u8) -> Match {
@@ -193,7 +188,7 @@ impl Lexer {
                 id: m.pattern(),
                 mat: Match { len: m.end() },
             })
-            .ok_or_else(|| self.error(TsErrorType::ExpectedNotFound))
+            .ok_or_else(|| self.error(SyntaxErrorType::ExpectedNotFound))
     }
 
     fn range(&self, m: Match) -> SourceRange {
@@ -476,7 +471,7 @@ fn lex_regex(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsResult<T
                 // Cannot escape line terminator.
                 // WARNING: Does not consider other line terminators allowed by spec.
                 if lexer.peek(1)? == b'\n' {
-                    return Err(lexer.error(TsErrorType::LineTerminatorInRegex));
+                    return Err(lexer.error(SyntaxErrorType::LineTerminatorInRegex));
                 };
                 lexer.consume(lexer.n(2)?);
             }
@@ -485,7 +480,7 @@ fn lex_regex(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsResult<T
                 break;
             }
             b'\n' => {
-                return Err(lexer.error(TsErrorType::LineTerminatorInRegex));
+                return Err(lexer.error(SyntaxErrorType::LineTerminatorInRegex));
             }
             _ => unreachable!(),
         };
@@ -511,7 +506,7 @@ fn lex_string(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsResult<
                 lexer.consume(lexer.n(2)?);
             }
             b'\n' => {
-                return Err(lexer.error(TsErrorType::LineTerminatorInString));
+                return Err(lexer.error(SyntaxErrorType::LineTerminatorInString));
             }
             c if c == quote => {
                 lexer.skip_expect(1);

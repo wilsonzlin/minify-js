@@ -3,8 +3,7 @@ use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, AddAssign};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::rc::Rc;
 
 /// A string backed by a source. Treated as a string, so contents rather than position is considered
 /// the value. For example, two SourceRange values are equal if their contents equal, even if they
@@ -34,7 +33,6 @@ impl SourceRange {
     }
 
     pub fn extend(&mut self, other: &SourceRange) {
-        debug_assert_eq!(self.source.path(), other.source.path());
         self.start = min(self.start, other.start);
         self.end = max(self.end, other.end);
     }
@@ -44,7 +42,6 @@ impl Add for &SourceRange {
     type Output = SourceRange;
 
     fn add(self, rhs: Self) -> Self::Output {
-        debug_assert_eq!(self.source.path(), rhs.source.path());
         SourceRange {
             source: self.source.clone(),
             start: min(self.start, rhs.start),
@@ -96,32 +93,15 @@ impl PartialEq<str> for SourceRange {
 }
 
 struct SourceData {
-    path: PathBuf,
     code: Vec<u8>,
 }
 
-impl Debug for SourceData {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        self.path.fmt(f)
-    }
-}
-
 #[derive(Clone)]
-pub struct Source(Arc<SourceData>);
-
-impl Debug for Source {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
+pub struct Source(Rc<SourceData>);
 
 impl Source {
-    pub fn new(name: PathBuf, code: Vec<u8>) -> Source {
-        Source(Arc::new(SourceData { path: name, code }))
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.0.path
+    pub fn new(code: Vec<u8>) -> Source {
+        Source(Rc::new(SourceData { code }))
     }
 
     pub fn code(&self) -> &[u8] {

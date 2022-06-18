@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use crate::ast::ClassOrObjectMemberKey;
-use crate::error::{TsError, TsErrorType, TsResult};
+use crate::error::{SyntaxError, SyntaxErrorType, TsResult};
 use crate::num::JsNumber;
 use crate::parse::expr::parse_expr;
 use crate::parse::parser::Parser;
@@ -24,7 +24,7 @@ pub fn normalise_literal_number(raw: &SourceRange) -> TsResult<JsNumber> {
         s => f64::from_str(s).map_err(|_| ()),
     }
     .map(|n| JsNumber(n))
-    .map_err(|_| TsError::from_loc(raw, TsErrorType::MalformedLiteralNumber))
+    .map_err(|_| SyntaxError::from_loc(raw, SyntaxErrorType::MalformedLiteralNumber))
 }
 
 pub fn normalise_literal_string(raw: &SourceRange) -> TsResult<String> {

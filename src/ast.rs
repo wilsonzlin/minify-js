@@ -1,7 +1,7 @@
 use std::fmt;
 use std::fmt::{Debug, Formatter};
 
-use crate::error::{TsError, TsErrorType};
+use crate::error::{SyntaxError, SyntaxErrorType};
 use crate::num::JsNumber;
 use crate::operator::OperatorName;
 use crate::source::SourceRange;
@@ -359,8 +359,8 @@ impl Node {
         }
     }
 
-    pub fn error(&self, typ: TsErrorType) -> TsError {
-        TsError::from_loc(self.loc(), typ)
+    pub fn error(&self, typ: SyntaxErrorType) -> SyntaxError {
+        SyntaxError::from_loc(self.loc(), typ)
     }
 
     pub fn loc(&self) -> &SourceRange {

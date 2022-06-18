@@ -1,5 +1,5 @@
 use crate::ast::{Node, Syntax, VarDeclMode, VariableDeclarator};
-use crate::error::{TsErrorType, TsResult};
+use crate::error::{SyntaxErrorType, TsResult};
 use crate::parse::parser::Parser;
 use crate::parse::pattern::parse_pattern;
 use crate::parse::signature::parse_signature_function;
@@ -22,7 +22,7 @@ pub fn parse_decl_var(parser: &mut Parser, parse_mode: VarDeclParseMode) -> TsRe
         TokenType::KeywordLet => VarDeclMode::Let,
         TokenType::KeywordConst => VarDeclMode::Const,
         TokenType::KeywordVar => VarDeclMode::Var,
-        _ => return Err(t.error(TsErrorType::ExpectedSyntax("variable declaration"))),
+        _ => return Err(t.error(SyntaxErrorType::ExpectedSyntax("variable declaration"))),
     };
     let mut declarators = vec![];
     let mut loc = t.loc().clone();

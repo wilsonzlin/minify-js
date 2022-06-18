@@ -2,7 +2,7 @@ use crate::ast::{
     ExportNames, ForInOfStmtHeaderLhs, ForStmtHeader, ForThreeInit, ImportNames,
     ImportOrExportName, Node, SwitchBranch, Syntax, TryCatch,
 };
-use crate::error::{TsErrorType, TsResult};
+use crate::error::{SyntaxErrorType, TsResult};
 use crate::parse::decl::{parse_decl_function, parse_decl_var};
 use crate::parse::expr::parse_expr;
 use crate::parse::literal::parse_and_normalise_literal_string;
@@ -86,7 +86,7 @@ fn parse_stmt_break_or_continue(parser: &mut Parser, t: TokenType) -> TsResult<B
     } else if next.preceded_by_line_terminator() {
         None
     } else {
-        return Err(next.error(TsErrorType::ExpectedSyntax("continue label")));
+        return Err(next.error(SyntaxErrorType::ExpectedSyntax("continue label")));
     };
     Ok(BreakOrContinue { loc, label })
 }
@@ -169,7 +169,7 @@ pub fn parse_stmt_export(parser: &mut Parser) -> TsResult<Node> {
                 Syntax::ExportDeclStmt { declaration },
             )
         }
-        _ => return Err(t.error(TsErrorType::ExpectedSyntax("exportable"))),
+        _ => return Err(t.error(SyntaxErrorType::ExpectedSyntax("exportable"))),
     })
 }
 
@@ -230,12 +230,12 @@ pub fn parse_stmt_for(parser: &mut Parser) -> TsResult<Node> {
                 _ => unreachable!(),
             };
             let lhs = match lhs_raw {
-                LhsRaw::Empty => return Err(start.error(TsErrorType::ForLoopHeaderHasNoLhs)),
+                LhsRaw::Empty => return Err(start.error(SyntaxErrorType::ForLoopHeaderHasNoLhs)),
                 LhsRaw::Declaration(node) => match node.stx() {
                     Syntax::VarDecl { declarators, .. } => {
                         if declarators.len() != 1 {
                             return Err(
-                                start.error(TsErrorType::ForLoopHeaderHasMultipleDeclarators)
+                                start.error(SyntaxErrorType::ForLoopHeaderHasMultipleDeclarators)
                             );
                         }
                         ForInOfStmtHeaderLhs::Declaration(node)
@@ -244,7 +244,7 @@ pub fn parse_stmt_for(parser: &mut Parser) -> TsResult<Node> {
                 },
                 LhsRaw::Pattern(pat) => ForInOfStmtHeaderLhs::Pattern(pat),
                 LhsRaw::Expression(_) => {
-                    return Err(start.error(TsErrorType::ForLoopHeaderHasInvalidLhs))
+                    return Err(start.error(SyntaxErrorType::ForLoopHeaderHasInvalidLhs))
                 }
             };
             let rhs = parse_expr(parser, TokenType::ParenthesisClose)?;
@@ -268,7 +268,7 @@ pub fn parse_stmt_for(parser: &mut Parser) -> TsResult<Node> {
                     ForThreeInit::None
                 }
                 LhsRaw::Pattern(_) => {
-                    return Err(start.error(TsErrorType::ForLoopHeaderHasInvalidLhs))
+                    return Err(start.error(SyntaxErrorType::ForLoopHeaderHasInvalidLhs))
                 }
             };
             let condition = if parser.consume_if(TokenType::Semicolon)?.is_match() {
@@ -398,7 +398,7 @@ pub fn parse_stmt_throw(parser: &mut Parser) -> TsResult<Node> {
     let start = parser.require(TokenType::KeywordThrow)?;
     if parser.peek()?.preceded_by_line_terminator() {
         // Illegal under Automatic Semicolon Insertion rules.
-        return Err(start.error(TsErrorType::LineTerminatorAfterThrow));
+        return Err(start.error(SyntaxErrorType::LineTerminatorAfterThrow));
     }
     // Use parse_stmt_expression to handle ASI.
     let value = parse_stmt_expression(parser)?;
@@ -434,7 +434,7 @@ pub fn parse_stmt_try(parser: &mut Parser) -> TsResult<Node> {
         None
     };
     if catch.is_none() && finally.is_none() {
-        return Err(start.error(TsErrorType::TryStatementHasNoCatchOrFinally));
+        return Err(start.error(SyntaxErrorType::TryStatementHasNoCatchOrFinally));
     }
     Ok(Node::new(
         loc,

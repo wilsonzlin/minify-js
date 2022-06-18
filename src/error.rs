@@ -1,10 +1,10 @@
 use std::fmt::{self, Debug, Formatter};
 
-use crate::source::{Source, SourceRange};
+use crate::source::SourceRange;
 use crate::token::TokenType;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub enum TsErrorType {
+pub enum SyntaxErrorType {
     ExpectedNotFound,
     ExpectedSyntax(&'static str),
     ForLoopHeaderHasMultipleDeclarators,
@@ -22,51 +22,40 @@ pub enum TsErrorType {
 }
 
 #[derive(Clone)]
-pub struct TsError {
+pub struct SyntaxError {
     position: usize,
-    source: Source,
-    typ: TsErrorType,
+    typ: SyntaxErrorType,
 }
 
-impl TsError {
-    pub fn new(typ: TsErrorType, source: Source, position: usize) -> TsError {
-        TsError {
-            typ,
-            source,
-            position,
-        }
+impl SyntaxError {
+    pub fn new(typ: SyntaxErrorType, position: usize) -> SyntaxError {
+        SyntaxError { typ, position }
     }
 
-    pub fn from_loc(loc: &SourceRange, typ: TsErrorType) -> TsError {
-        TsError {
+    pub fn from_loc(loc: &SourceRange, typ: SyntaxErrorType) -> SyntaxError {
+        SyntaxError {
             typ,
-            source: loc.source.clone(),
             position: loc.start,
         }
     }
 
-    pub fn typ(&self) -> TsErrorType {
+    pub fn typ(&self) -> SyntaxErrorType {
         self.typ
     }
 }
 
-impl Debug for TsError {
+impl Debug for SyntaxError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!(
-            "{:?} [{}:{}]",
-            self.typ,
-            self.source.path().display(),
-            self.position
-        ))
+        f.write_fmt(format_args!("{:?} [{}]", self.typ, self.position))
     }
 }
 
-impl PartialEq for TsError {
+impl PartialEq for SyntaxError {
     fn eq(&self, other: &Self) -> bool {
         self.typ == other.typ
     }
 }
 
-impl Eq for TsError {}
+impl Eq for SyntaxError {}
 
-pub type TsResult<T> = Result<T, TsError>;
+pub type TsResult<T> = Result<T, SyntaxError>;

@@ -1,4 +1,4 @@
-use crate::error::{TsError, TsErrorType};
+use crate::error::{SyntaxError, SyntaxErrorType};
 use crate::source::SourceRange;
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
@@ -157,8 +157,8 @@ impl Token {
         self.loc
     }
 
-    pub fn error(&self, typ: TsErrorType) -> TsError {
-        TsError::from_loc(&self.loc, typ)
+    pub fn error(&self, typ: SyntaxErrorType) -> SyntaxError {
+        SyntaxError::from_loc(&self.loc, typ)
     }
 
     pub fn preceded_by_line_terminator(&self) -> bool {

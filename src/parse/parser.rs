@@ -1,6 +1,4 @@
-use std::collections::{HashMap, HashSet};
-
-use crate::error::{TsError, TsErrorType, TsResult};
+use crate::error::{SyntaxError, SyntaxErrorType, TsResult};
 use crate::lex::{lex_next, LexMode, Lexer, LexerCheckpoint};
 use crate::source::SourceRange;
 use crate::token::{Token, TokenType};
@@ -32,9 +30,9 @@ impl MaybeToken {
         }
     }
 
-    pub fn error(&self, err: TsErrorType) -> TsError {
+    pub fn error(&self, err: SyntaxErrorType) -> SyntaxError {
         debug_assert!(!self.matched);
-        TsError::from_loc(&self.range, err)
+        SyntaxError::from_loc(&self.range, err)
     }
 
     pub fn and_then<R, F: FnOnce() -> TsResult<R>>(self, f: F) -> TsResult<Option<R>> {
@@ -152,7 +150,7 @@ impl Parser {
     pub fn require_with_mode(&mut self, typ: TokenType, mode: LexMode) -> TsResult<Token> {
         let t = self.next_with_mode(mode)?;
         if t.typ() != typ {
-            Err(t.error(TsErrorType::RequiredTokenNotFound(typ)))
+            Err(t.error(SyntaxErrorType::RequiredTokenNotFound(typ)))
         } else {
             Ok(t)
         }
@@ -165,7 +163,7 @@ impl Parser {
     ) -> TsResult<Token> {
         let t = self.next_with_mode(LexMode::Standard)?;
         if !pred(t.typ()) {
-            Err(t.error(TsErrorType::ExpectedSyntax(expected)))
+            Err(t.error(SyntaxErrorType::ExpectedSyntax(expected)))
         } else {
             Ok(t)
         }

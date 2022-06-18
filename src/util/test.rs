@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use crate::ast::{Node, Syntax};
 use crate::lex::Lexer;
 use crate::parse::parser::Parser;
@@ -18,7 +16,7 @@ pub fn ident_pat(name: &str) -> Node {
 pub fn n(stx: Syntax) -> Node {
     Node::new(
         SourceRange {
-            source: Source::new(PathBuf::from("Dummy location"), vec![]),
+            source: Source::new(vec![]),
             start: 0,
             end: 0,
         },
@@ -27,18 +25,12 @@ pub fn n(stx: Syntax) -> Node {
 }
 
 pub fn p(code: &str) -> Parser {
-    Parser::new(Lexer::new(
-        PathBuf::from("Test input"),
-        code.as_bytes().to_vec(),
-    ))
+    Parser::new(Lexer::new(code.as_bytes().to_vec()))
 }
 
 pub fn r(code: &str) -> SourceRange {
     SourceRange {
-        source: Source::new(
-            PathBuf::from("Standalone source range"),
-            code.as_bytes().to_vec(),
-        ),
+        source: Source::new(code.as_bytes().to_vec()),
         start: 0,
         end: code.len(),
     }

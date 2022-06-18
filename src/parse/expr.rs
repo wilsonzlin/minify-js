@@ -1,7 +1,7 @@
 use crate::ast::{
     ArrayElement, ClassOrObjectMemberKey, ClassOrObjectMemberValue, Node, ObjectMember, Syntax,
 };
-use crate::error::{TsErrorType, TsResult};
+use crate::error::{SyntaxErrorType, TsResult};
 use crate::lex::{LexMode, KEYWORDS_MAPPING};
 use crate::operator::{Associativity, OperatorName, OPERATORS};
 use crate::parse::literal::{
@@ -258,12 +258,12 @@ pub fn parse_expr_arrow_function_or_grouping(
         let arrow = parser.require(TokenType::EqualsChevronRight)?;
         if arrow.preceded_by_line_terminator() {
             // Illegal under Automatic Semicolon Insertion rules.
-            return Err(arrow.error(TsErrorType::LineTerminatorAfterArrowFunctionParameters));
+            return Err(arrow.error(SyntaxErrorType::LineTerminatorAfterArrowFunctionParameters));
         }
         Ok(sig)
     }) {
         Ok(sig) => sig,
-        Err(err) if err.typ() == TsErrorType::LineTerminatorAfterArrowFunctionParameters => {
+        Err(err) if err.typ() == SyntaxErrorType::LineTerminatorAfterArrowFunctionParameters => {
             return Err(err.clone())
         }
         Err(_) => {
@@ -387,7 +387,7 @@ fn parse_expr_operand(
                 parser.restore_checkpoint(cp);
                 parse_expr_arrow_function_or_grouping(parser, terminator_a, terminator_b, asi)?
             }
-            _ => return Err(t.error(TsErrorType::ExpectedSyntax("expression operand"))),
+            _ => return Err(t.error(SyntaxErrorType::ExpectedSyntax("expression operand"))),
         }
     };
     Ok(operand)
@@ -449,7 +449,7 @@ pub fn parse_expr_with_min_prec(
                     asi.did_end_with_asi = true;
                     break;
                 };
-                return Err(t.error(TsErrorType::ExpectedSyntax("expression operator")));
+                return Err(t.error(SyntaxErrorType::ExpectedSyntax("expression operator")));
             }
             Some(operator) => {
                 if operator.precedence < min_prec {

@@ -1,11 +1,9 @@
-use std::path::PathBuf;
-
-use crate::error::TsErrorType::{self, *};
+use crate::error::SyntaxErrorType::{self, *};
 use crate::lex::{lex_next, LexMode, Lexer};
 use crate::token::TokenType::{self, *};
 
-fn check(code: &str, expecteds: &[TokenType], expected_err: Option<TsErrorType>) -> () {
-    let mut lexer = Lexer::new(PathBuf::from("Test input"), code.as_bytes().to_vec());
+fn check(code: &str, expecteds: &[TokenType], expected_err: Option<SyntaxErrorType>) -> () {
+    let mut lexer = Lexer::new(code.as_bytes().to_vec());
     for expected in expecteds {
         match lex_next(&mut lexer, LexMode::Standard) {
             Err(e) => panic!("Failed to parse code with error {:?}: {}", e.typ(), code),
