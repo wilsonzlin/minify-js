@@ -1,9 +1,14 @@
 [package]
 authors = ["Wilson Lin <code@wilsonl.in>"]
+categories = ["compression", "command-line-utilities", "development-tools::build-utils", "web-programming"]
 description = "Extremely fast JavaScript minifier"
 edition = "2021"
+homepage = "https://github.com/wilsonzlin/minify-js"
+include = ["/src/**/*", "/Cargo.toml", "/LICENSE", "/README.md"]
+keywords = ["javascript", "compress", "minifier", "js", "ecmascript"]
 license = "Apache-2.0"
 name = "minify-js"
+readme = "README.md"
 repository = "https://github.com/wilsonzlin/minify-js"
 version = "0.0.1"
 
