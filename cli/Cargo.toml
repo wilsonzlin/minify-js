@@ -1,0 +1,10 @@
+[package]
+publish = false
+name = "minify-js-cli"
+description = "Extremely fast JS minifier"
+version = "0.0.2"
+authors = ["Wilson Lin <code@wilsonl.in>"]
+edition = "2021"
+
+[dependencies]
+minify-js = { path = "../rust" }
