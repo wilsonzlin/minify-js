@@ -1,0 +1,13 @@
+[package]
+authors = ["Wilson Lin <code@wilsonl.in>"]
+description = "Extremely fast JavaScript minifier"
+edition = "2021"
+license = "Apache-2.0"
+name = "minify-js"
+repository = "https://github.com/wilsonzlin/minify-js"
+version = "0.0.1"
+
+[dependencies]
+aho-corasick = "0.7"
+lazy_static = "1.4"
+memchr = "2.3"
