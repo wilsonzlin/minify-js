@@ -6,7 +6,7 @@ Currently under development, with the goal to be similar in effectiveness to com
 
 ## Goals
 
-- Fully written in Rust for maximum compatibility with Rust programs and FFI libraries.
+- Fully written in Rust for maximum compatibility with Rust programs and derivatives (FFI, WASM, embedded, etc.).
 - Maximises performance on a single CPU core for simple efficient scaling and easy compatible integration.
 - Minification of individual inputs/files only; no bundling or transforming.
 - Prefer minimal complexity and faster performance over maximum configurability and minimal extra compression.
@@ -38,3 +38,10 @@ assert_eq!(out.get_ref().as_slice(), b"let x=1;");
 - Combine and reorder declarations.
 - Omit more semicolons, spaces, parentheses, and braces.
 - More extensive testing, especially over rare syntax.
+- Evaluation and folding of constant expressions.
+- Parse and erase TypeScript syntax.
+- FFI libraries for other languages.
+- Aliasing of reused well-knowns.
+- Removal of unreachable code.
+- Unwrap string literal computed members.
+- Aliasing frequently accessed members and methods.
