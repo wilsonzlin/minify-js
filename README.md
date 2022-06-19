@@ -45,3 +45,4 @@ assert_eq!(out.get_ref().as_slice(), b"let x=1;");
 - Removal of unreachable code.
 - Unwrap string literal computed members.
 - Aliasing frequently accessed members and methods.
+- Better support for non-ASCII syntax.

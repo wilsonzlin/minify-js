@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "bench/minify-js",
+    "cli",
+    "rust",
+]

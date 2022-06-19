@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+bin_path="$(cargo build --release --message-format=json | jq -r '.executable | select(. != null)')"
+ln -fsv "$bin_path" ./run
