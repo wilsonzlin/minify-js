@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::source::{Source, SourceRange};
+use crate::{ast::Node, source::SourceRange};
 
 pub struct Identifier {
     name: SourceRange,
 }
 
 struct SymbolData {
-    loc: SourceRange,
     name: SourceRange,
+    declarator_pattern: Node,
 }
 
 #[derive(Clone)]
@@ -26,6 +26,7 @@ pub enum ScopeType {
 
 struct ScopeData {
     symbols: HashMap<Identifier, Symbol>,
+    ancestor_function_or_toplevel: Scope,
     parent: Option<Scope>,
     typ: ScopeType,
 }
@@ -36,23 +37,18 @@ pub struct Scope {
 }
 
 impl Scope {
-    pub fn new(parent: Option<Scope>, typ: ScopeType) -> Scope {
+    pub fn new(
+        ancestor_function_or_toplevel: Scope,
+        parent: Option<Scope>,
+        typ: ScopeType,
+    ) -> Scope {
         Scope {
             data: Rc::new(ScopeData {
                 symbols: HashMap::new(),
+                ancestor_function_or_toplevel,
                 parent,
                 typ,
             }),
         }
     }
-}
-
-pub struct ExportIdentifier {
-    module: Source,
-    name: Identifier,
-}
-
-pub struct ProgramSymbols {
-    globals: HashMap<Identifier, Symbol>,
-    exports: HashMap<ExportIdentifier, Symbol>,
 }

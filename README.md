@@ -2,7 +2,7 @@
 
 Extremely fast JavaScript minifier, written in Rust.
 
-Currently under development, with the goal to be similar in effectiveness to common minifiers including [esbuild](https://github.com/wilsonzlin/esbuild-rs) and [terser](https://github.com/terser/terser). Improvements and suggestions welcome!
+Currently usable, but under development, with the goal to be similar in effectiveness to common minifiers including [esbuild](https://github.com/wilsonzlin/esbuild-rs) and [terser](https://github.com/terser/terser). Improvements and suggestions welcome!
 
 ## Goals
 
@@ -10,6 +10,10 @@ Currently under development, with the goal to be similar in effectiveness to com
 - Maximises performance on a single CPU core for simple efficient scaling and easy compatible integration.
 - Minification of individual inputs/files only; no bundling or transforming.
 - Prefer minimal complexity and faster performance over maximum configurability and minimal extra compression.
+
+## Features
+
+- Fast parsing powered by SIMD instructions and lookup tables.
 
 ## Usage
 
