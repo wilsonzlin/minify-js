@@ -27,7 +27,7 @@ impl NodeData {
     }
 
     pub fn error(&self, typ: SyntaxErrorType) -> SyntaxError {
-        SyntaxError::from_loc(self.loc(), typ)
+        SyntaxError::from_loc(self.loc(), typ, None)
     }
 
     pub fn loc(&self) -> &SourceRange {
@@ -142,6 +142,7 @@ pub enum ArrayElement {
 
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum ClassOrObjectMemberKey {
+    // Identifier, keyword, string, or number.
     Direct(SourceRange),
     Computed(Expression),
 }
@@ -152,11 +153,13 @@ pub enum ClassOrObjectMemberValue {
         body: Statement,
     },
     Method {
+        is_async: bool,
+        generator: bool,
         signature: NodeId,
         body: Statement,
     },
     Property {
-        // Must be Some if object.
+        // Must be Some if object, as shorthands are covered by ObjectMemberType::Shorthand (and are initialised).
         initializer: Option<Expression>,
     },
     Setter {
@@ -268,7 +271,7 @@ pub enum Syntax {
         rest: Option<Pattern>,
     },
     // Not really a pattern but functions similarly; separated out for easy replacement when minifying.
-    FunctionName {
+    ClassOrFunctionName {
         name: SourceRange,
     },
 
@@ -279,8 +282,8 @@ pub enum Syntax {
 
     // Declarations.
     ClassDecl {
-        name: Option<SourceRange>,
-        super_class: Option<SourceRange>,
+        name: NodeId,
+        extends: Option<Expression>,
         members: Vec<ClassMember>,
     },
     FunctionDecl {
@@ -314,6 +317,12 @@ pub enum Syntax {
         parenthesised: bool,
         callee: Expression,
         arguments: Vec<Expression>,
+    },
+    ClassExpr {
+        parenthesised: bool,
+        name: Option<NodeId>,
+        extends: Option<Expression>,
+        members: Vec<ClassMember>,
     },
     ConditionalExpr {
         parenthesised: bool,
@@ -423,6 +432,9 @@ pub enum Syntax {
     ForStmt {
         header: ForStmtHeader,
         body: Statement,
+    },
+    LabelStmt {
+        name: SourceRange,
     },
     ReturnStmt {
         value: Option<Expression>,

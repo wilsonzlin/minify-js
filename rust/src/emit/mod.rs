@@ -1,6 +1,7 @@
 use crate::ast::{
-    ArrayElement, ClassOrObjectMemberKey, ClassOrObjectMemberValue, ForInOfStmtHeaderLhs,
-    ForStmtHeader, ForThreeInit, NodeId, NodeMap, ObjectMemberType, Syntax, VarDeclMode,
+    ArrayElement, ClassMember, ClassOrObjectMemberKey, ClassOrObjectMemberValue,
+    ForInOfStmtHeaderLhs, ForStmtHeader, ForThreeInit, NodeId, NodeMap, ObjectMemberType, Syntax,
+    VarDeclMode,
 };
 use crate::operator::{OperatorName, OPERATORS};
 use lazy_static::lazy_static;
@@ -66,7 +67,7 @@ lazy_static! {
 
   pub static ref UNARY_OPERATOR_SYNTAX: HashMap<OperatorName, &'static str> = {
       let mut map = HashMap::<OperatorName, &'static str>::new();
-      // Excluded: Postfix{Increment,Decrement}, Yield, YieldDelegated.
+      // Excluded: Postfix{Increment,Decrement}.
       map.insert(OperatorName::Await, "await ");
       map.insert(OperatorName::BitwiseNot, "~");
       map.insert(OperatorName::Delete, "delete ");
@@ -78,6 +79,8 @@ lazy_static! {
       map.insert(OperatorName::UnaryNegation, "-");
       map.insert(OperatorName::UnaryPlus, "+");
       map.insert(OperatorName::Void, "void ");
+      map.insert(OperatorName::Yield, "yield ");
+      map.insert(OperatorName::YieldDelegated, "yield*");
       map
   };
 }
@@ -88,6 +91,7 @@ fn emit_class_or_object_member<T: Write>(
     map: &NodeMap,
     key: &ClassOrObjectMemberKey,
     value: &ClassOrObjectMemberValue,
+    value_delimiter: &[u8],
 ) -> io::Result<bool> {
     let is_computed_key = match key {
         ClassOrObjectMemberKey::Computed(_) => true,
@@ -106,6 +110,20 @@ fn emit_class_or_object_member<T: Write>(
                 out.write_all(b" ")?;
             };
         }
+        ClassOrObjectMemberValue::Method {
+            is_async,
+            generator,
+            ..
+        } => {
+            if *is_async {
+                out.write_all(b"async")?;
+            }
+            if *generator {
+                out.write_all(b"*")?;
+            } else if *is_async {
+                out.write_all(b" ")?;
+            }
+        }
         _ => {}
     };
     match key {
@@ -123,7 +141,9 @@ fn emit_class_or_object_member<T: Write>(
             out.write_all(b"()")?;
             emit_js(out, map, *body)?;
         }
-        ClassOrObjectMemberValue::Method { signature, body } => {
+        ClassOrObjectMemberValue::Method {
+            signature, body, ..
+        } => {
             out.write_all(b"(")?;
             emit_js(out, map, *signature)?;
             out.write_all(b")")?;
@@ -131,7 +151,7 @@ fn emit_class_or_object_member<T: Write>(
         }
         ClassOrObjectMemberValue::Property { initializer } => {
             if let Some(v) = initializer {
-                out.write_all(b":")?;
+                out.write_all(value_delimiter)?;
                 emit_js(out, map, *v)?;
             };
         }
@@ -147,6 +167,36 @@ fn emit_class_or_object_member<T: Write>(
         ClassOrObjectMemberValue::Property { .. } => true,
         _ => false,
     })
+}
+
+fn emit_class<T: Write>(
+    out: &mut T,
+    map: &NodeMap,
+    name: Option<NodeId>,
+    extends: Option<NodeId>,
+    members: &Vec<ClassMember>,
+) -> io::Result<()> {
+    out.write_all(b"class ")?;
+    if let Some(n) = name {
+        emit_js(out, map, n)?;
+    }
+    if let Some(s) = extends {
+        out.write_all(b" extends ")?;
+        emit_js(out, map, s)?;
+    }
+    out.write_all(b"{")?;
+    let mut last_member_was_property = false;
+    for (i, m) in members.iter().enumerate() {
+        if i > 0 && last_member_was_property {
+            out.write_all(b";")?;
+        }
+        if m.statik {
+            out.write_all(b"static ")?;
+        }
+        last_member_was_property = emit_class_or_object_member(out, map, &m.key, &m.value, b"=")?;
+    }
+    out.write_all(b"}")?;
+    Ok(())
 }
 
 pub fn emit_js<T: Write>(out: &mut T, m: &NodeMap, n: NodeId) -> io::Result<()> {
@@ -234,7 +284,7 @@ fn emit_js_under_operator<T: Write>(
             };
             out.write_all(b"}")?;
         }
-        Syntax::FunctionName { name } => {
+        Syntax::ClassOrFunctionName { name } => {
             out.write_all(name.as_slice())?;
         }
         Syntax::FunctionSignature { parameters } => {
@@ -247,30 +297,10 @@ fn emit_js_under_operator<T: Write>(
         }
         Syntax::ClassDecl {
             name,
-            super_class,
+            extends,
             members,
         } => {
-            out.write_all(b"class")?;
-            if let Some(n) = name {
-                out.write_all(b" ")?;
-                out.write_all(n.as_slice())?;
-            }
-            if let Some(s) = super_class {
-                out.write_all(b" ")?;
-                out.write_all(s.as_slice())?;
-            }
-            out.write_all(b"{")?;
-            let mut last_member_was_property = false;
-            for (i, m) in members.iter().enumerate() {
-                if i > 0 && last_member_was_property {
-                    out.write_all(b",")?;
-                }
-                if m.statik {
-                    out.write_all(b"static ")?;
-                }
-                last_member_was_property = emit_class_or_object_member(out, map, &m.key, &m.value)?;
-            }
-            out.write_all(b"}")?;
+            emit_class(out, map, Some(*name), *extends, members)?;
         }
         Syntax::FunctionDecl {
             generator,
@@ -744,7 +774,7 @@ fn emit_js_under_operator<T: Write>(
         Syntax::ObjectMember { typ } => {
             match typ {
                 ObjectMemberType::Valued { key, value } => {
-                    emit_class_or_object_member(out, map, key, value)?;
+                    emit_class_or_object_member(out, map, key, value, b":")?;
                 }
                 ObjectMemberType::Shorthand { name } => {
                     out.write_all(name.as_slice())?;
@@ -786,6 +816,27 @@ fn emit_js_under_operator<T: Write>(
             if must_parenthesise {
                 out.write_all(b")")?;
             };
+        }
+        Syntax::ClassExpr {
+            parenthesised,
+            name,
+            extends,
+            members,
+        } => {
+            // We need to keep parentheses to prevent class expressions from being misinterpreted as a class declaration, which cannot be part of an expression.
+            // TODO Omit parentheses if possible.
+            if *parenthesised {
+                out.write_all(b"(")?;
+            }
+            emit_class(out, map, *name, *extends, members)?;
+            // TODO Omit parentheses if possible.
+            if *parenthesised {
+                out.write_all(b")")?;
+            }
+        }
+        Syntax::LabelStmt { name } => {
+            out.write_all(name.as_slice())?;
+            out.write_all(b":")?;
         }
     };
     Ok(())

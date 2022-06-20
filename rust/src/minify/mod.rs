@@ -5,7 +5,7 @@ use crate::{
     },
     char::{ID_CONTINUE_CHARSTR, ID_START_CHARSTR},
     source::{Source, SourceRange},
-    symbol::{Identifier, ScopeMap, Symbol},
+    symbol::ScopeMap,
 };
 
 fn generate_minified_name(mut id: usize) -> SourceRange {
@@ -39,6 +39,44 @@ struct NodeUpdates {
     next_new_node_id: usize,
 }
 
+fn visit_class_or_object_key(
+    s: &ScopeMap,
+    m: &NodeMap,
+    updates: &mut NodeUpdates,
+    key: &ClassOrObjectMemberKey,
+) -> () {
+    match key {
+        ClassOrObjectMemberKey::Direct(e) => {}
+        ClassOrObjectMemberKey::Computed(e) => visit_node(s, m, updates, *e),
+    };
+}
+
+fn visit_class_or_object_value(
+    s: &ScopeMap,
+    m: &NodeMap,
+    updates: &mut NodeUpdates,
+    value: &ClassOrObjectMemberValue,
+) -> () {
+    match value {
+        ClassOrObjectMemberValue::Getter { body } => visit_node(s, m, updates, *body),
+        ClassOrObjectMemberValue::Method {
+            signature, body, ..
+        } => {
+            visit_node(s, m, updates, *signature);
+            visit_node(s, m, updates, *body);
+        }
+        ClassOrObjectMemberValue::Property { initializer } => {
+            if let Some(initializer) = initializer {
+                visit_node(s, m, updates, *initializer);
+            };
+        }
+        ClassOrObjectMemberValue::Setter { body, parameter } => {
+            visit_node(s, m, updates, *parameter);
+            visit_node(s, m, updates, *body);
+        }
+    }
+}
+
 fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -> () {
     let scope_id = m[n].scope();
     let scope = &s[scope_id];
@@ -55,7 +93,7 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
             visit_node(s, m, updates, *signature);
             visit_node(s, m, updates, *body);
         }
-        stx @ (Syntax::IdentifierPattern { name } | Syntax::FunctionName { name }) => {
+        stx @ (Syntax::IdentifierPattern { name } | Syntax::ClassOrFunctionName { name }) => {
             let sym = scope.find_symbol(s, name);
             if let Some(sym) = sym {
                 let minified = generate_minified_name(sym.minified_name_id());
@@ -68,7 +106,7 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
                             Syntax::IdentifierPattern { .. } => Syntax::IdentifierPattern {
                                 name: minified.clone(),
                             },
-                            Syntax::FunctionName { .. } => Syntax::FunctionName {
+                            Syntax::ClassOrFunctionName { .. } => Syntax::ClassOrFunctionName {
                                 name: minified.clone(),
                             },
                             _ => unreachable!(),
@@ -117,9 +155,35 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
         }
         Syntax::ClassDecl {
             name,
-            super_class,
+            extends,
             members,
-        } => todo!(),
+        } => {
+            visit_node(s, m, updates, *name);
+            if let Some(extends) = extends {
+                visit_node(s, m, updates, *extends);
+            };
+            for member in members {
+                visit_class_or_object_key(s, m, updates, &member.key);
+                visit_class_or_object_value(s, m, updates, &member.value);
+            }
+        }
+        Syntax::ClassExpr {
+            name,
+            extends,
+            members,
+            ..
+        } => {
+            if let Some(name) = name {
+                visit_node(s, m, updates, *name);
+            }
+            if let Some(extends) = extends {
+                visit_node(s, m, updates, *extends);
+            };
+            for member in members {
+                visit_class_or_object_key(s, m, updates, &member.key);
+                visit_class_or_object_value(s, m, updates, &member.value);
+            }
+        }
         Syntax::ComputedMemberExpr { object, member } => {
             visit_node(s, m, updates, *object);
             visit_node(s, m, updates, *member);
@@ -376,28 +440,8 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
         Syntax::ObjectMember { typ } => {
             match typ {
                 ObjectMemberType::Valued { key, value } => {
-                    match key {
-                        ClassOrObjectMemberKey::Direct(e) => {}
-                        ClassOrObjectMemberKey::Computed(e) => visit_node(s, m, updates, *e),
-                    };
-                    match value {
-                        ClassOrObjectMemberValue::Getter { body } => {
-                            visit_node(s, m, updates, *body)
-                        }
-                        ClassOrObjectMemberValue::Method { signature, body } => {
-                            visit_node(s, m, updates, *signature);
-                            visit_node(s, m, updates, *body);
-                        }
-                        ClassOrObjectMemberValue::Property { initializer } => {
-                            if let Some(initializer) = initializer {
-                                visit_node(s, m, updates, *initializer);
-                            };
-                        }
-                        ClassOrObjectMemberValue::Setter { body, parameter } => {
-                            visit_node(s, m, updates, *parameter);
-                            visit_node(s, m, updates, *body);
-                        }
-                    }
+                    visit_class_or_object_key(s, m, updates, key);
+                    visit_class_or_object_value(s, m, updates, value);
                 }
                 ObjectMemberType::Shorthand { name } => {
                     let sym = scope.find_symbol(s, name);
@@ -441,6 +485,7 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
         Syntax::MemberAccessExpr { left, .. } => {
             visit_node(s, m, updates, *left);
         }
+        Syntax::LabelStmt { name } => {}
     };
 }
 

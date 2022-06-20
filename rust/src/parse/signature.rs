@@ -6,10 +6,14 @@ use crate::parse::pattern::parse_pattern;
 use crate::symbol::ScopeId;
 use crate::token::TokenType;
 
-use super::pattern::ParsePatternAction;
+use super::pattern::{ParsePatternAction, ParsePatternSyntax};
 
 // `scope` should be a newly created closure scope for this function.
-pub fn parse_signature_function(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId> {
+pub fn parse_signature_function(
+    scope: ScopeId,
+    parser: &mut Parser,
+    syntax: &ParsePatternSyntax,
+) -> TsResult<NodeId> {
     let start_pos = parser.checkpoint();
 
     let mut parameters = Vec::new();
@@ -20,9 +24,15 @@ pub fn parse_signature_function(scope: ScopeId, parser: &mut Parser) -> TsResult
         };
 
         let rest = parser.consume_if(TokenType::DotDotDot)?.is_match();
-        let pattern = parse_pattern(scope, parser, ParsePatternAction::AddToClosureScope)?;
+        let pattern = parse_pattern(scope, parser, ParsePatternAction::AddToClosureScope, syntax)?;
         let default_value = parser.consume_if(TokenType::Equals)?.and_then(|| {
-            parse_expr_until_either(scope, parser, TokenType::Comma, TokenType::ParenthesisClose)
+            parse_expr_until_either(
+                scope,
+                parser,
+                TokenType::Comma,
+                TokenType::ParenthesisClose,
+                syntax,
+            )
         })?;
 
         // TODO Location

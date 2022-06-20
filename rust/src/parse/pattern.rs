@@ -4,7 +4,7 @@ use crate::parse::expr::parse_expr_until_either;
 use crate::parse::literal::parse_class_or_object_member_key;
 use crate::parse::parser::Parser;
 use crate::symbol::{ScopeId, Symbol};
-use crate::token::TokenType;
+use crate::token::{TokenType, UNRESERVED_KEYWORDS};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ParsePatternAction {
@@ -14,12 +14,38 @@ pub enum ParsePatternAction {
     AddToClosureScope,
 }
 
+pub struct ParsePatternSyntax {
+    // `await` is not allowed as an arrow function parameter or a parameter/variable inside an async function.
+    pub await_allowed: bool,
+    // `async` is not allowed as a parameter/variable inside an async function.
+    pub async_allowed: bool,
+    // `yield` is not allowed as a parameter/variable inside a generator function.
+    pub yield_allowed: bool,
+}
+
+pub fn is_valid_pattern_identifier(typ: TokenType, syntax: &ParsePatternSyntax) -> bool {
+    match typ {
+        TokenType::Identifier => true,
+        TokenType::KeywordAsync if syntax.async_allowed => true,
+        TokenType::KeywordAwait if syntax.await_allowed => true,
+        TokenType::KeywordYield if syntax.yield_allowed => true,
+        t if UNRESERVED_KEYWORDS.contains(&t) => true,
+        _ => false,
+    }
+}
+
 fn parse_pattern_identifier(
     scope: ScopeId,
     parser: &mut Parser,
     action: ParsePatternAction,
+    syntax: &ParsePatternSyntax,
 ) -> TsResult<NodeId> {
-    let t = parser.require(TokenType::Identifier)?;
+    if !is_valid_pattern_identifier(parser.peek()?.typ(), syntax) {
+        return Err(parser
+            .peek()?
+            .error(SyntaxErrorType::ExpectedSyntax("identifier")));
+    }
+    let t = parser.next()?;
     let node_id = parser.create_node(
         scope,
         t.loc().clone(),
@@ -46,13 +72,14 @@ pub fn parse_pattern(
     scope: ScopeId,
     parser: &mut Parser,
     action: ParsePatternAction,
+    syntax: &ParsePatternSyntax,
 ) -> TsResult<NodeId> {
     let checkpoint = parser.checkpoint();
     let t = parser.next()?;
     Ok(match t.typ() {
-        TokenType::Identifier => {
+        t if is_valid_pattern_identifier(t, syntax) => {
             parser.restore_checkpoint(checkpoint);
-            parse_pattern_identifier(scope, parser, action)?
+            parse_pattern_identifier(scope, parser, action, syntax)?
         }
         TokenType::BraceOpen => {
             let mut properties = Vec::<NodeId>::new();
@@ -64,13 +91,13 @@ pub fn parse_pattern(
                 let mut loc = parser.peek()?.loc_take();
                 // Check inside loop to ensure that it must come first or after a comma.
                 if parser.consume_if(TokenType::DotDotDot)?.is_match() {
-                    rest = Some(parse_pattern_identifier(scope, parser, action)?);
+                    rest = Some(parse_pattern_identifier(scope, parser, action, syntax)?);
                     break;
                 };
 
-                let key = parse_class_or_object_member_key(scope, parser)?;
+                let key = parse_class_or_object_member_key(scope, parser, syntax)?;
                 let target = if parser.consume_if(TokenType::Colon)?.is_match() {
-                    Some(parse_pattern(scope, parser, action)?)
+                    Some(parse_pattern(scope, parser, action, syntax)?)
                 } else {
                     if let ClassOrObjectMemberKey::Computed(name) = key {
                         return Err(parser[name].error(SyntaxErrorType::ExpectedSyntax(
@@ -85,6 +112,7 @@ pub fn parse_pattern(
                         parser,
                         TokenType::Comma,
                         TokenType::BraceClose,
+                        syntax,
                     )?)
                 } else {
                     None
@@ -138,7 +166,7 @@ pub fn parse_pattern(
                 };
                 // Check inside loop to ensure that it must come first or after a comma.
                 if parser.consume_if(TokenType::DotDotDot)?.is_match() {
-                    rest = Some(parse_pattern(scope, parser, action)?);
+                    rest = Some(parse_pattern(scope, parser, action, syntax)?);
                     break;
                 };
 
@@ -146,13 +174,14 @@ pub fn parse_pattern(
                 if parser.consume_if(TokenType::Comma)?.is_match() {
                     elements.push(None);
                 } else {
-                    let target = parse_pattern(scope, parser, action)?;
+                    let target = parse_pattern(scope, parser, action, syntax)?;
                     let default_value = if parser.consume_if(TokenType::Equals)?.is_match() {
                         Some(parse_expr_until_either(
                             scope,
                             parser,
                             TokenType::Comma,
                             TokenType::BracketClose,
+                            syntax,
                         )?)
                     } else {
                         None

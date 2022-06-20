@@ -149,8 +149,7 @@ const PRECEDENCE_LEVELS: &'static [&'static [(OperatorName, Arity, Associativity
     &[(BitwiseXor, Binary, Left)],
     &[(BitwiseOr, Binary, Left)],
     &[(LogicalAnd, Binary, Left)],
-    &[(LogicalOr, Binary, Left)],
-    &[(NullishCoalescing, Binary, Left)],
+    &[(LogicalOr, Binary, Left), (NullishCoalescing, Binary, Left)],
     &[(Conditional, Ternary, Right)],
     &[
         (Assignment, Binary, Right),
@@ -169,8 +168,9 @@ const PRECEDENCE_LEVELS: &'static [&'static [(OperatorName, Arity, Associativity
         (AssignmentNullishCoalescing, Binary, Right),
         (AssignmentRemainder, Binary, Right),
         (AssignmentSubtraction, Binary, Right),
+        (Yield, Unary, Right),
+        (YieldDelegated, Unary, Right),
     ],
-    &[(Yield, Unary, Right), (YieldDelegated, Unary, Right)],
     &[(Comma, Binary, Left)],
 ];
 

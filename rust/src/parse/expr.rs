@@ -15,7 +15,8 @@ use crate::parse::stmt::parse_stmt;
 use crate::symbol::{ScopeId, ScopeType, Symbol};
 use crate::token::TokenType;
 
-use super::pattern::{parse_pattern, ParsePatternAction};
+use super::class_or_object::{parse_class_or_object_member, ParseClassOrObjectMemberResult};
+use super::pattern::{is_valid_pattern_identifier, ParsePatternSyntax};
 use super::stmt::parse_stmt_block;
 
 pub struct Asi {
@@ -39,7 +40,11 @@ impl Asi {
     }
 }
 
-pub fn parse_call_args(scope: ScopeId, parser: &mut Parser) -> TsResult<Vec<NodeId>> {
+pub fn parse_call_args(
+    scope: ScopeId,
+    parser: &mut Parser,
+    syntax: &ParsePatternSyntax,
+) -> TsResult<Vec<NodeId>> {
     let mut args = Vec::<NodeId>::new();
     loop {
         if parser.peek()?.typ() == TokenType::ParenthesisClose {
@@ -50,6 +55,7 @@ pub fn parse_call_args(scope: ScopeId, parser: &mut Parser) -> TsResult<Vec<Node
             parser,
             TokenType::Comma,
             TokenType::ParenthesisClose,
+            syntax,
         )?);
         if !parser.consume_if(TokenType::Comma)?.is_match() {
             break;
@@ -58,7 +64,12 @@ pub fn parse_call_args(scope: ScopeId, parser: &mut Parser) -> TsResult<Vec<Node
     Ok(args)
 }
 
-pub fn parse_expr(scope: ScopeId, parser: &mut Parser, terminator: TokenType) -> TsResult<NodeId> {
+pub fn parse_expr(
+    scope: ScopeId,
+    parser: &mut Parser,
+    terminator: TokenType,
+    syntax: &ParsePatternSyntax,
+) -> TsResult<NodeId> {
     let mut asi = Asi::no();
     parse_expr_with_min_prec(
         scope,
@@ -68,6 +79,7 @@ pub fn parse_expr(scope: ScopeId, parser: &mut Parser, terminator: TokenType) ->
         TokenType::_Dummy,
         false,
         &mut asi,
+        syntax,
     )
 }
 
@@ -76,8 +88,18 @@ pub fn parse_expr_with_asi(
     parser: &mut Parser,
     terminator: TokenType,
     asi: &mut Asi,
+    syntax: &ParsePatternSyntax,
 ) -> TsResult<NodeId> {
-    parse_expr_with_min_prec(scope, parser, 1, terminator, TokenType::_Dummy, false, asi)
+    parse_expr_with_min_prec(
+        scope,
+        parser,
+        1,
+        terminator,
+        TokenType::_Dummy,
+        false,
+        asi,
+        syntax,
+    )
 }
 
 pub fn parse_expr_until_either(
@@ -85,6 +107,7 @@ pub fn parse_expr_until_either(
     parser: &mut Parser,
     terminator_a: TokenType,
     terminator_b: TokenType,
+    syntax: &ParsePatternSyntax,
 ) -> TsResult<NodeId> {
     let mut asi = Asi::no();
     parse_expr_with_min_prec(
@@ -95,6 +118,7 @@ pub fn parse_expr_until_either(
         terminator_b,
         false,
         &mut asi,
+        syntax,
     )
 }
 
@@ -104,11 +128,26 @@ pub fn parse_expr_until_either_with_asi(
     terminator_a: TokenType,
     terminator_b: TokenType,
     asi: &mut Asi,
+    syntax: &ParsePatternSyntax,
 ) -> TsResult<NodeId> {
-    parse_expr_with_min_prec(scope, parser, 1, terminator_a, terminator_b, false, asi)
+    parse_expr_with_min_prec(
+        scope,
+        parser,
+        1,
+        terminator_a,
+        terminator_b,
+        false,
+        asi,
+        syntax,
+    )
 }
 
-pub fn parse_grouping(scope: ScopeId, parser: &mut Parser, asi: &mut Asi) -> TsResult<NodeId> {
+pub fn parse_grouping(
+    scope: ScopeId,
+    parser: &mut Parser,
+    asi: &mut Asi,
+    syntax: &ParsePatternSyntax,
+) -> TsResult<NodeId> {
     parser.require(TokenType::ParenthesisOpen)?;
     let expr = parse_expr_with_min_prec(
         scope,
@@ -118,12 +157,17 @@ pub fn parse_grouping(scope: ScopeId, parser: &mut Parser, asi: &mut Asi) -> TsR
         TokenType::_Dummy,
         true,
         asi,
+        syntax,
     )?;
     parser.require(TokenType::ParenthesisClose)?;
     Ok(expr)
 }
 
-pub fn parse_expr_array(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId> {
+pub fn parse_expr_array(
+    scope: ScopeId,
+    parser: &mut Parser,
+    syntax: &ParsePatternSyntax,
+) -> TsResult<NodeId> {
     let loc_start = parser.require(TokenType::BracketOpen)?.loc_take();
     let mut elements = Vec::<ArrayElement>::new();
     loop {
@@ -135,8 +179,13 @@ pub fn parse_expr_array(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId>
             break;
         };
         let rest = parser.consume_if(TokenType::DotDotDot)?.is_match();
-        let value =
-            parse_expr_until_either(scope, parser, TokenType::Comma, TokenType::BracketClose)?;
+        let value = parse_expr_until_either(
+            scope,
+            parser,
+            TokenType::Comma,
+            TokenType::BracketClose,
+            syntax,
+        )?;
         elements.push(if rest {
             ArrayElement::Rest(value)
         } else {
@@ -155,7 +204,11 @@ pub fn parse_expr_array(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId>
     ))
 }
 
-pub fn parse_expr_object(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId> {
+pub fn parse_expr_object(
+    scope: ScopeId,
+    parser: &mut Parser,
+    syntax: &ParsePatternSyntax,
+) -> TsResult<NodeId> {
     let loc_start = parser.require(TokenType::BraceOpen)?.loc_take();
     let mut members = Vec::<NodeId>::new();
     loop {
@@ -164,8 +217,13 @@ pub fn parse_expr_object(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId
         };
         let rest = parser.consume_if(TokenType::DotDotDot)?.is_match();
         if rest {
-            let value =
-                parse_expr_until_either(scope, parser, TokenType::Comma, TokenType::BraceClose)?;
+            let value = parse_expr_until_either(
+                scope,
+                parser,
+                TokenType::Comma,
+                TokenType::BraceClose,
+                syntax,
+            )?;
             let loc = parser[value].loc().clone();
             members.push(parser.create_node(
                 scope,
@@ -175,104 +233,29 @@ pub fn parse_expr_object(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId
                 },
             ));
         } else {
-            let loc = parser.peek()?.loc_take();
-            let checkpoint = parser.checkpoint();
-            let mut is_getter = parser.consume_if(TokenType::KeywordGet)?.is_match();
-            let mut is_setter = !is_getter && parser.consume_if(TokenType::KeywordSet)?.is_match();
-            if (is_getter || is_setter) && parser.peek()?.typ() == TokenType::Colon {
-                // Not actually getter/setter, just using `get`/`set` as property name.
-                parser.restore_checkpoint(checkpoint);
-                is_getter = false;
-                is_setter = false;
-            }
-            let (key, key_is_direct) = if parser.consume_if(TokenType::BracketOpen)?.is_match() {
-                let key = ClassOrObjectMemberKey::Computed(parse_expr(
-                    scope,
-                    parser,
-                    TokenType::BracketClose,
-                )?);
-                parser.require(TokenType::BracketClose)?;
-                (key, false)
-            } else {
-                let loc = if let Some(str) = parser
-                    .consume_if(TokenType::LiteralString)?
-                    .match_loc_take()
-                {
-                    // TODO Do we need to remove quotes and/or decode?
-                    str
-                } else if let Some(num) = parser
-                    .consume_if(TokenType::LiteralNumber)?
-                    .match_loc_take()
-                {
-                    // TODO Do we need to normalise?
-                    num
-                } else if let Some(loc) = parser.consume_if(TokenType::Identifier)?.match_loc_take()
-                {
-                    loc
-                } else {
-                    parser
-                        .require_predicate(
-                            |t| KEYWORDS_MAPPING.contains_key(&t),
-                            "keyword or identifier",
-                        )?
-                        .loc_take()
-                };
-                (ClassOrObjectMemberKey::Direct(loc), true)
-            };
-            let value = if is_getter {
-                parser.require(TokenType::ParenthesisOpen)?;
-                parser.require(TokenType::ParenthesisClose)?;
-                Some(ClassOrObjectMemberValue::Getter {
-                    body: parse_stmt_block(scope, parser)?,
-                })
-            } else if is_setter {
-                let setter_scope = parser.create_child_scope(scope, ScopeType::Closure);
-                parser.require(TokenType::ParenthesisOpen)?;
-                let parameter =
-                    parse_pattern(setter_scope, parser, ParsePatternAction::AddToClosureScope)?;
-                parser.require(TokenType::ParenthesisClose)?;
-                Some(ClassOrObjectMemberValue::Setter {
-                    parameter,
-                    body: parse_stmt_block(setter_scope, parser)?,
-                })
-            } else if parser.peek()?.typ() == TokenType::ParenthesisOpen {
-                let signature = parse_signature_function(scope, parser)?;
-                Some(ClassOrObjectMemberValue::Method {
-                    signature,
-                    body: parse_stmt_block(scope, parser)?,
-                })
-            } else if key_is_direct
-                && match parser.peek()?.typ() {
-                    TokenType::Comma | TokenType::BraceClose => true,
-                    _ => false,
-                }
-            {
-                None
-            } else {
-                parser.require(TokenType::Colon)?;
-                let value = parse_expr_until_either(
-                    scope,
-                    parser,
-                    TokenType::Comma,
-                    TokenType::BraceClose,
-                )?;
-                Some(ClassOrObjectMemberValue::Property {
-                    initializer: Some(value),
-                })
-            };
-            // TODO loc.
+            let loc_checkpoint = parser.checkpoint();
+            let ParseClassOrObjectMemberResult { key, value } = parse_class_or_object_member(
+                scope,
+                parser,
+                TokenType::Colon,
+                TokenType::Comma,
+                &mut Asi::no(),
+                syntax,
+            )?;
             members.push(parser.create_node(
                 scope,
-                loc,
+                parser.since_checkpoint(loc_checkpoint),
                 Syntax::ObjectMember {
                     typ: match value {
-                        Some(value) => ObjectMemberType::Valued { key, value },
-                        None => ObjectMemberType::Shorthand {
-                            name: match key {
-                                ClassOrObjectMemberKey::Direct(key) => key.clone(),
-                                _ => unreachable!(),
-                            },
-                        },
+                        ClassOrObjectMemberValue::Property { initializer: None } => {
+                            ObjectMemberType::Shorthand {
+                                name: match key {
+                                    ClassOrObjectMemberKey::Direct(key) => key.clone(),
+                                    _ => unreachable!(),
+                                },
+                            }
+                        }
+                        _ => ObjectMemberType::Valued { key, value },
                     },
                 },
             ));
@@ -296,6 +279,7 @@ pub fn parse_expr_arrow_function_or_grouping(
     terminator_a: TokenType,
     terminator_b: TokenType,
     asi: &mut Asi,
+    syntax: &ParsePatternSyntax,
 ) -> TsResult<NodeId> {
     // Try and parse as arrow function signature first.
     // If we fail, backtrack and parse as grouping instead.
@@ -311,7 +295,7 @@ pub fn parse_expr_arrow_function_or_grouping(
 
     let fn_scope = parser.create_child_scope(scope, ScopeType::Closure);
 
-    let signature = match parse_signature_function(fn_scope, parser).and_then(|sig| {
+    let signature = match parse_signature_function(fn_scope, parser, syntax).and_then(|sig| {
         let arrow = parser.require(TokenType::EqualsChevronRight)?;
         if arrow.preceded_by_line_terminator() {
             // Illegal under Automatic Semicolon Insertion rules.
@@ -325,12 +309,12 @@ pub fn parse_expr_arrow_function_or_grouping(
         }
         Err(_) => {
             parser.restore_checkpoint(cp);
-            return parse_grouping(scope, parser, asi);
+            return parse_grouping(scope, parser, asi, syntax);
         }
     };
     let body = match parser.peek()?.typ() {
-        TokenType::BraceOpen => parse_stmt(fn_scope, parser)?,
-        _ => parse_expr_until_either(fn_scope, parser, terminator_a, terminator_b)?,
+        TokenType::BraceOpen => parse_stmt(fn_scope, parser, syntax)?,
+        _ => parse_expr_until_either(fn_scope, parser, terminator_a, terminator_b, syntax)?,
     };
     Ok(parser.create_node(
         scope,
@@ -353,7 +337,11 @@ pub fn parse_expr_import(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId
     ))
 }
 
-pub fn parse_expr_function(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId> {
+pub fn parse_expr_function(
+    scope: ScopeId,
+    parser: &mut Parser,
+    syntax: &ParsePatternSyntax,
+) -> TsResult<NodeId> {
     let fn_scope = parser.create_child_scope(scope, ScopeType::Closure);
     let start = parser.require(TokenType::KeywordFunction)?.loc().clone();
     let generator = parser.consume_if(TokenType::Asterisk)?.is_match();
@@ -362,15 +350,15 @@ pub fn parse_expr_function(scope: ScopeId, parser: &mut Parser) -> TsResult<Node
             let name_node = parser.create_node(
                 fn_scope,
                 name.clone(),
-                Syntax::FunctionName { name: name.clone() },
+                Syntax::ClassOrFunctionName { name: name.clone() },
             );
             parser[fn_scope].add_symbol(name.clone(), Symbol::new(name_node))?;
             Some(name_node)
         }
         None => None,
     };
-    let signature = parse_signature_function(fn_scope, parser)?;
-    let body = parse_stmt_block(fn_scope, parser)?;
+    let signature = parse_signature_function(fn_scope, parser, syntax)?;
+    let body = parse_stmt_block(fn_scope, parser, syntax)?;
     Ok(parser.create_node(
         scope,
         &start + parser[body].loc(),
@@ -390,10 +378,18 @@ fn parse_expr_operand(
     terminator_a: TokenType,
     terminator_b: TokenType,
     asi: &mut Asi,
+    syntax: &ParsePatternSyntax,
 ) -> TsResult<NodeId> {
     let cp = parser.checkpoint();
     let t = parser.next_with_mode(LexMode::SlashIsRegex)?;
     let operand = if let Some(operator) = UNARY_OPERATOR_MAPPING.get(&t.typ()) {
+        let operator = if operator.name == OperatorName::Yield
+            && parser.consume_if(TokenType::Asterisk)?.is_match()
+        {
+            &OPERATORS[&OperatorName::YieldDelegated]
+        } else {
+            *operator
+        };
         let next_min_prec =
             operator.precedence + (operator.associativity == Associativity::Left) as u8;
         let operand = parse_expr_with_min_prec(
@@ -404,6 +400,7 @@ fn parse_expr_operand(
             terminator_b,
             false,
             asi,
+            syntax,
         )?;
         parser.create_node(
             scope,
@@ -418,13 +415,13 @@ fn parse_expr_operand(
         match t.typ() {
             TokenType::BracketOpen => {
                 parser.restore_checkpoint(cp);
-                parse_expr_array(scope, parser)?
+                parse_expr_array(scope, parser, syntax)?
             }
             TokenType::BraceOpen => {
                 parser.restore_checkpoint(cp);
-                parse_expr_object(scope, parser)?
+                parse_expr_object(scope, parser, syntax)?
             }
-            TokenType::Identifier => parser.create_node(
+            typ if is_valid_pattern_identifier(typ, syntax) => parser.create_node(
                 scope,
                 t.loc().clone(),
                 Syntax::IdentifierExpr {
@@ -433,7 +430,7 @@ fn parse_expr_operand(
             ),
             TokenType::KeywordFunction => {
                 parser.restore_checkpoint(cp);
-                parse_expr_function(scope, parser)?
+                parse_expr_function(scope, parser, syntax)?
             }
             TokenType::KeywordImport => {
                 parser.restore_checkpoint(cp);
@@ -480,6 +477,7 @@ fn parse_expr_operand(
                     terminator_a,
                     terminator_b,
                     asi,
+                    syntax,
                 )?
             }
             _ => return Err(t.error(SyntaxErrorType::ExpectedSyntax("expression operand"))),
@@ -496,8 +494,9 @@ pub fn parse_expr_with_min_prec(
     terminator_b: TokenType,
     parenthesised: bool,
     asi: &mut Asi,
+    syntax: &ParsePatternSyntax,
 ) -> TsResult<NodeId> {
-    let mut left = parse_expr_operand(scope, parser, terminator_a, terminator_b, asi)?;
+    let mut left = parse_expr_operand(scope, parser, terminator_a, terminator_b, asi, syntax)?;
 
     loop {
         let cp = parser.checkpoint();
@@ -559,7 +558,7 @@ pub fn parse_expr_with_min_prec(
 
                 left = match operator.name {
                     OperatorName::Call => {
-                        let arguments = parse_call_args(scope, parser)?;
+                        let arguments = parse_call_args(scope, parser, syntax)?;
                         let end = parser.require(TokenType::ParenthesisClose)?;
                         parser.create_node(
                             scope,
@@ -572,7 +571,7 @@ pub fn parse_expr_with_min_prec(
                         )
                     }
                     OperatorName::ComputedMemberAccess => {
-                        let member = parse_expr(scope, parser, TokenType::BracketClose)?;
+                        let member = parse_expr(scope, parser, TokenType::BracketClose, syntax)?;
                         let end = parser.require(TokenType::BracketClose)?;
                         parser.create_node(
                             scope,
@@ -584,7 +583,7 @@ pub fn parse_expr_with_min_prec(
                         )
                     }
                     OperatorName::Conditional => {
-                        let consequent = parse_expr(scope, parser, TokenType::Colon)?;
+                        let consequent = parse_expr(scope, parser, TokenType::Colon, syntax)?;
                         parser.require(TokenType::Colon)?;
                         let alternate = parse_expr_with_min_prec(
                             scope,
@@ -594,6 +593,7 @@ pub fn parse_expr_with_min_prec(
                             terminator_b,
                             false,
                             asi,
+                            syntax,
                         )?;
                         parser.create_node(
                             scope,
@@ -641,6 +641,7 @@ pub fn parse_expr_with_min_prec(
                             terminator_b,
                             false,
                             asi,
+                            syntax,
                         )?;
                         parser.create_node(
                             scope,

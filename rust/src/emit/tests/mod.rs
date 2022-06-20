@@ -24,6 +24,9 @@ fn test_emit() {
     check(
         r#"
           /* Test code */
+          function * gen () {
+            yield * "hello world!";
+          }
           !() => {
             com.java.names.long
             module.functions
@@ -44,13 +47,15 @@ fn test_emit() {
             const ipsum = (a) => {}, dolor = (1/7)/(2/7)
           }()
         "#,
-        "!()=>{\
+        "\
+        function*a(){yield*\"hello world!\";}\
+        !()=>{\
         com.java.names.long;\
         module.functions;\
-        var a=1,b,{brown:c,_:[d,e,,,...f],...g}=i;\
-        ({the:k}=1,[l]=2)=>{{let m=d;}k,l,c,d;return ;1.2.toString();}();\
-        const h=({})=>{};\
-        const i=k=>{},j=(1/7)/(2/7);\
+        var b=1,c,{brown:d,_:[e,f,,,...g],...h}=i;\
+        ({the:l}=1,[m]=2)=>{{let n=e;}l,m,d,e;return ;1.2.toString();}();\
+        const i=({})=>{};\
+        const j=l=>{},k=(1/7)/(2/7);\
         }();\
         ",
     )

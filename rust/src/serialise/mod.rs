@@ -24,7 +24,7 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
             "properties": properties.iter().map(|n| visit_node(m, *n)).collect::<Vec<_>>(),
             "rest": rest.map(|n| visit_node(m, n)),
         }),
-        Syntax::FunctionName { name } => json!({
+        Syntax::ClassOrFunctionName { name } => json!({
             "$t": "FunctionName",
             "name": name.as_str().to_string(),
         }),
@@ -34,7 +34,13 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
         }),
         Syntax::ClassDecl {
             name,
-            super_class,
+            extends,
+            members,
+        } => todo!(),
+        Syntax::ClassExpr {
+            parenthesised,
+            name,
+            extends,
             members,
         } => todo!(),
         Syntax::FunctionDecl {
@@ -276,15 +282,22 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
             },
             "body": visit_node(m, *body),
         }),
+        Syntax::LabelStmt { name } => json!({
+            "$t": "LabelStmt",
+            "value": name.as_str().to_string(),
+        }),
         Syntax::ReturnStmt { value } => json!({
-            "$t": "ReturnStmt", "value": value.map(|n| visit_node(m, n)) }),
+            "$t": "ReturnStmt",
+            "value": value.map(|n| visit_node(m, n)) }),
         Syntax::SwitchStmt { test, branches } => json!({
             "$t": "SwitchStmt",
             "test": visit_node(m, *test),
             "branches": branches.iter().map(|n| visit_node(m, *n)).collect::<Vec<_>>(),
         }),
         Syntax::ThrowStmt { value } => json!({
-            "$t": "ThrowStmt", "value": visit_node(m, *value) }),
+            "$t": "ThrowStmt",
+            "value": visit_node(m, *value),
+        }),
         Syntax::TryStmt {
             wrapped,
             catch,
@@ -303,7 +316,8 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
             "body": visit_node(m, *body),
         }),
         Syntax::TopLevel { body } => json!({
-            "$t": "TopLevel", "body": body.iter().map(|n| visit_node(m, *n)).collect::<Vec<_>>() }),
+            "$t": "TopLevel",
+            "body": body.iter().map(|n| visit_node(m, *n)).collect::<Vec<_>>() }),
         Syntax::CatchBlock { parameter, body } => json!({
             "$t": "CatchBlock",
             "parameter": parameter.map(|n| visit_node(m, n)),
@@ -335,8 +349,10 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
                                     "body": visit_node(m, *body),
                                 }),
                             }),
-                            ClassOrObjectMemberValue::Method { signature, body } => json!({
+                            ClassOrObjectMemberValue::Method { is_async, generator, signature, body } => json!({
                                 "method": json!({
+                                    "async": is_async,
+                                    "generator": generator,
                                     "signature": visit_node(m, *signature),
                                     "body": visit_node(m, *body),
                                 }),

@@ -5,7 +5,6 @@ use crate::token::TokenType;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum SyntaxErrorType {
-    DuplicateVarDecl,
     ExpectedNotFound,
     ExpectedSyntax(&'static str),
     ForLoopHeaderHasInvalidLhs,
@@ -26,17 +25,31 @@ pub enum SyntaxErrorType {
 pub struct SyntaxError {
     position: usize,
     typ: SyntaxErrorType,
+    actual_token: Option<TokenType>,
 }
 
 impl SyntaxError {
-    pub fn new(typ: SyntaxErrorType, position: usize) -> SyntaxError {
-        SyntaxError { typ, position }
+    pub fn new(
+        typ: SyntaxErrorType,
+        position: usize,
+        actual_token: Option<TokenType>,
+    ) -> SyntaxError {
+        SyntaxError {
+            typ,
+            position,
+            actual_token,
+        }
     }
 
-    pub fn from_loc(loc: &SourceRange, typ: SyntaxErrorType) -> SyntaxError {
+    pub fn from_loc(
+        loc: &SourceRange,
+        typ: SyntaxErrorType,
+        actual_token: Option<TokenType>,
+    ) -> SyntaxError {
         SyntaxError {
             typ,
             position: loc.start,
+            actual_token,
         }
     }
 
@@ -47,7 +60,10 @@ impl SyntaxError {
 
 impl Debug for SyntaxError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{:?} [{}]", self.typ, self.position))
+        f.write_fmt(format_args!(
+            "{:?} [{} {:?}]",
+            self.typ, self.position, self.actual_token
+        ))
     }
 }
 

@@ -87,7 +87,7 @@ impl Lexer {
     }
 
     fn error(&self, typ: SyntaxErrorType) -> SyntaxError {
-        SyntaxError::new(typ, self.next)
+        SyntaxError::new(typ, self.next, None)
     }
 
     fn at_end(&self) -> bool {

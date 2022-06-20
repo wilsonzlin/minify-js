@@ -65,10 +65,8 @@ impl ScopeData {
 
     pub fn add_symbol(&mut self, identifier: Identifier, symbol: Symbol) -> TsResult<()> {
         if self.symbols.insert(identifier.clone(), symbol).is_some() {
-            Err(SyntaxError::new(
-                SyntaxErrorType::DuplicateVarDecl,
-                identifier.start,
-            ))
+            // TODO Investigate raising an error; however, many production codebases redeclare `var`.
+            Ok(())
         } else {
             self.symbol_declaration_order.push(identifier);
             Ok(())

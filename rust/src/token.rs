@@ -1,5 +1,8 @@
+use std::collections::HashSet;
+
 use crate::error::{SyntaxError, SyntaxErrorType};
 use crate::source::SourceRange;
+use lazy_static::lazy_static;
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum TokenType {
@@ -129,6 +132,22 @@ pub enum TokenType {
     Tilde,
 }
 
+lazy_static! {
+  // These can be used as parameter and variable names.
+  pub static ref UNRESERVED_KEYWORDS: HashSet<TokenType> = {
+    let mut set = HashSet::<TokenType>::new();
+    set.insert(TokenType::KeywordAs);
+    set.insert(TokenType::KeywordConstructor);
+    set.insert(TokenType::KeywordFrom);
+    set.insert(TokenType::KeywordGet);
+    set.insert(TokenType::KeywordLet);
+    set.insert(TokenType::KeywordOf);
+    set.insert(TokenType::KeywordSet);
+    set.insert(TokenType::KeywordStatic);
+    set
+  };
+}
+
 #[derive(Clone, Debug)]
 pub struct Token {
     loc: SourceRange,
@@ -160,7 +179,7 @@ impl Token {
     }
 
     pub fn error(&self, typ: SyntaxErrorType) -> SyntaxError {
-        SyntaxError::from_loc(&self.loc, typ)
+        SyntaxError::from_loc(&self.loc, typ, Some(self.typ.clone()))
     }
 
     pub fn preceded_by_line_terminator(&self) -> bool {

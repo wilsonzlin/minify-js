@@ -9,6 +9,7 @@ use crate::token::{Token, TokenType};
 
 #[derive(Debug)]
 pub struct MaybeToken {
+    typ: TokenType,
     range: SourceRange,
     matched: bool,
 }
@@ -36,7 +37,7 @@ impl MaybeToken {
 
     pub fn error(&self, err: SyntaxErrorType) -> SyntaxError {
         debug_assert!(!self.matched);
-        SyntaxError::from_loc(&self.range, err)
+        SyntaxError::from_loc(&self.range, err, Some(self.typ))
     }
 
     pub fn and_then<R, F: FnOnce() -> TsResult<R>>(self, f: F) -> TsResult<Option<R>> {
@@ -184,6 +185,7 @@ impl Parser {
     pub fn maybe_with_mode(&mut self, typ: TokenType, mode: LexMode) -> TsResult<MaybeToken> {
         let t = self.forward(mode, |t| t.typ() == typ)?;
         Ok(MaybeToken {
+            typ,
             matched: t.typ() == typ,
             range: t.loc_take(),
         })

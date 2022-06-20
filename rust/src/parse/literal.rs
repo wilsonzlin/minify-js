@@ -9,6 +9,8 @@ use crate::source::SourceRange;
 use crate::symbol::ScopeId;
 use crate::token::TokenType;
 
+use super::pattern::ParsePatternSyntax;
+
 fn parse_radix(raw: &str, radix: u32) -> Result<f64, ()> {
     u32::from_str_radix(raw, radix)
         .map_err(|_| ())
@@ -25,7 +27,7 @@ pub fn normalise_literal_number(raw: &SourceRange) -> TsResult<JsNumber> {
         s => f64::from_str(s).map_err(|_| ()),
     }
     .map(|n| JsNumber(n))
-    .map_err(|_| SyntaxError::from_loc(raw, SyntaxErrorType::MalformedLiteralNumber))
+    .map_err(|_| SyntaxError::from_loc(raw, SyntaxErrorType::MalformedLiteralNumber, None))
 }
 
 pub fn normalise_literal_string(raw: &SourceRange) -> TsResult<String> {
@@ -42,9 +44,10 @@ pub fn parse_and_normalise_literal_string(parser: &mut Parser) -> TsResult<Strin
 pub fn parse_class_or_object_member_key(
     scope: ScopeId,
     parser: &mut Parser,
+    syntax: &ParsePatternSyntax,
 ) -> TsResult<ClassOrObjectMemberKey> {
     Ok(if parser.consume_if(TokenType::BracketOpen)?.is_match() {
-        let expr = parse_expr(scope, parser, TokenType::BracketClose)?;
+        let expr = parse_expr(scope, parser, TokenType::BracketClose, syntax)?;
         parser.require(TokenType::BracketClose)?;
         ClassOrObjectMemberKey::Computed(expr)
     } else {
