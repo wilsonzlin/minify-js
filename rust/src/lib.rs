@@ -18,6 +18,7 @@ mod serialise;
 mod source;
 mod symbol;
 mod token;
+mod update;
 mod util;
 
 #[derive(Debug)]

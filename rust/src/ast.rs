@@ -251,6 +251,12 @@ pub enum ForStmtHeader {
 }
 
 #[derive(Eq, PartialEq, Debug)]
+pub enum LiteralTemplatePart {
+    Substitution(Expression),
+    String(SourceRange),
+}
+
+#[derive(Eq, PartialEq, Debug)]
 pub enum Syntax {
     // Patterns.
     IdentifierPattern {
@@ -314,9 +320,10 @@ pub enum Syntax {
         right: Expression,
     },
     CallExpr {
+        optional_chaining: bool,
         parenthesised: bool,
         callee: Expression,
-        arguments: Vec<Expression>,
+        arguments: Vec<NodeId>,
     },
     ClassExpr {
         parenthesised: bool,
@@ -331,6 +338,7 @@ pub enum Syntax {
         alternate: Expression,
     },
     ComputedMemberExpr {
+        optional_chaining: bool,
         object: Expression,
         member: Expression,
     },
@@ -366,14 +374,18 @@ pub enum Syntax {
     LiteralStringExpr {
         value: String,
     },
+    LiteralTemplateExpr {
+        parts: Vec<LiteralTemplatePart>,
+    },
     LiteralUndefined {},
     // Dedicated special type to easily distinguish when analysing and minifying. Also done to avoid using IdentifierExpr as right, which is incorrect (not a variable usage).
-    MemberAccessExpr {
+    MemberExpr {
         parenthesised: bool,
         optional_chaining: bool,
         left: Expression,
         right: SourceRange,
     },
+    SuperExpr {},
     ThisExpr {},
     UnaryExpr {
         parenthesised: bool,
@@ -463,6 +475,10 @@ pub enum Syntax {
     // Others.
     TopLevel {
         body: Vec<Statement>,
+    },
+    CallArg {
+        spread: bool,
+        value: Expression,
     },
     CatchBlock {
         parameter: Option<Pattern>,

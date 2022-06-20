@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Index;
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
@@ -87,7 +87,7 @@ impl Lexer {
     }
 
     fn error(&self, typ: SyntaxErrorType) -> SyntaxError {
-        SyntaxError::new(typ, self.next, None)
+        SyntaxError::new(typ, self.source.clone(), self.next, None)
     }
 
     fn at_end(&self) -> bool {
@@ -288,7 +288,7 @@ lazy_static! {
     };
 
     pub static ref KEYWORDS_MAPPING: HashMap<TokenType, &'static [u8]> = {
-      let mut map = HashMap::<TokenType, &'static [u8]>::new();
+        let mut map = HashMap::<TokenType, &'static [u8]>::new();
         map.insert(TokenType::KeywordAs, b"as");
         map.insert(TokenType::KeywordAsync, b"async");
         map.insert(TokenType::KeywordAwait, b"await");
@@ -337,6 +337,10 @@ lazy_static! {
         map.insert(TokenType::LiteralTrue, b"true");
         map.insert(TokenType::LiteralUndefined, b"undefined");
         map
+    };
+
+    pub static ref KEYWORD_STRS: HashMap<&'static [u8], usize> = {
+        HashMap::<&'static [u8], usize>::from_iter(KEYWORDS_MAPPING.values().enumerate().map(|(i, v)| (*v, i)))
     };
 
     // This has a specific order so that when we use MATCHER, we can find the corresponding TokenType.
@@ -418,6 +422,18 @@ fn lex_number(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsResult<
     lexer.consume(lexer.while_chars(&DIGIT));
     lexer.consume(lexer.if_char(b'.'));
     lexer.consume(lexer.while_chars(&DIGIT));
+    if lexer
+        .peek_or_eof(0)
+        .filter(|&c| c == b'e' || c == b'E')
+        .is_some()
+    {
+        lexer.skip_expect(1);
+        match lexer.peek(0)? {
+            b'+' | b'-' => lexer.skip_expect(1),
+            _ => {}
+        };
+        lexer.consume(lexer.while_chars(&DIGIT));
+    }
     Ok(Token::new(
         lexer.since_checkpoint(cp),
         TokenType::LiteralNumber,
@@ -463,26 +479,35 @@ fn lex_regex(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsResult<T
     let cp = lexer.checkpoint();
     // Consume slash.
     lexer.consume(lexer.n(1)?);
+    let mut in_charset = false;
     loop {
         // WARNING: Does not consider other line terminators allowed by spec.
-        lexer.consume(lexer.while_not_3_chars(b'\\', b'/', b'\n'));
         match lexer.peek(0)? {
             b'\\' => {
+                lexer.skip_expect(1);
                 // Cannot escape line terminator.
                 // WARNING: Does not consider other line terminators allowed by spec.
                 if lexer.peek(1)? == b'\n' {
                     return Err(lexer.error(SyntaxErrorType::LineTerminatorInRegex));
                 };
-                lexer.consume(lexer.n(2)?);
+                lexer.skip_expect(1);
             }
-            b'/' => {
+            b'/' if !in_charset => {
                 lexer.skip_expect(1);
                 break;
+            }
+            b'[' => {
+                lexer.skip_expect(1);
+                in_charset = true;
+            }
+            b']' if in_charset => {
+                lexer.skip_expect(1);
+                in_charset = false;
             }
             b'\n' => {
                 return Err(lexer.error(SyntaxErrorType::LineTerminatorInRegex));
             }
-            _ => unreachable!(),
+            _ => lexer.skip_expect(1),
         };
     }
     lexer.consume(lexer.while_chars(&ID_CONTINUE));
@@ -522,30 +547,53 @@ fn lex_string(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsResult<
     ))
 }
 
-// TODO Validate template.
-fn lex_template(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsResult<Token> {
+pub fn lex_template_string_continue(
+    lexer: &mut Lexer,
+    preceded_by_line_terminator: bool,
+) -> TsResult<Token> {
     let cp = lexer.checkpoint();
-    // Consume backtick.
-    lexer.skip_expect(1);
-    // TODO Substitutions.
+    let mut loc: Option<SourceRange> = None;
+    let mut ended = false;
     loop {
-        lexer.consume(lexer.while_not_2_chars(b'\\', b'`'));
+        lexer.consume(lexer.while_not_3_chars(b'\\', b'`', b'$'));
         match lexer.peek(0)? {
             b'\\' => {
                 lexer.consume(lexer.n(2)?);
             }
             b'`' => {
+                ended = true;
+                loc = Some(lexer.since_checkpoint(cp));
                 lexer.skip_expect(1);
                 break;
+            }
+            b'$' => {
+                if lexer.peek(1)? == b'{' {
+                    loc = Some(lexer.since_checkpoint(cp));
+                    lexer.skip_expect(2);
+                    break;
+                } else {
+                    lexer.skip_expect(1);
+                }
             }
             _ => unreachable!(),
         };
     }
     Ok(Token::new(
-        lexer.since_checkpoint(cp),
-        TokenType::LiteralTemplatePartString,
+        loc.unwrap(),
+        if ended {
+            TokenType::LiteralTemplatePartStringEnd
+        } else {
+            TokenType::LiteralTemplatePartString
+        },
         preceded_by_line_terminator,
     ))
+}
+
+// TODO Validate template.
+fn lex_template(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsResult<Token> {
+    // Consume backtick.
+    lexer.skip_expect(1);
+    lex_template_string_continue(lexer, preceded_by_line_terminator)
 }
 
 pub fn lex_next(lexer: &mut Lexer, mode: LexMode) -> TsResult<Token> {

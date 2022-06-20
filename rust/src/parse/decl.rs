@@ -9,7 +9,7 @@ use crate::token::TokenType;
 
 use super::class_or_object::{parse_class_or_object_member, ParseClassOrObjectMemberResult};
 use super::expr::{parse_expr, parse_expr_until_either_with_asi, Asi};
-use super::pattern::{ParsePatternAction, ParsePatternSyntax};
+use super::pattern::{is_valid_pattern_identifier, ParsePatternAction, ParsePatternSyntax};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum VarDeclParseMode {
@@ -92,7 +92,12 @@ pub fn parse_decl_function(
     let fn_scope = parser.create_child_scope(scope, ScopeType::Closure);
     let start = parser.require(TokenType::KeywordFunction)?.loc().clone();
     let generator = parser.consume_if(TokenType::Asterisk)?.is_match();
-    let name = parser.require(TokenType::Identifier)?.loc().clone();
+    let name = match parser.next()? {
+        t if is_valid_pattern_identifier(t.typ(), syntax) => t,
+        t => return Err(t.error(SyntaxErrorType::ExpectedSyntax("function name"))),
+    }
+    .loc()
+    .clone();
     let name_node = parser.create_node(
         fn_scope,
         name.clone(),

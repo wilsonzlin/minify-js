@@ -33,12 +33,13 @@ pub fn parse_stmt(
 ) -> TsResult<NodeId> {
     match parser.peek()?.typ() {
         TokenType::BraceOpen => parse_stmt_block(scope, parser, syntax),
-        TokenType::KeywordBreak => parse_stmt_break(scope, parser),
+        TokenType::KeywordBreak => parse_stmt_break(scope, parser, syntax),
         TokenType::KeywordClass => parse_decl_class(scope, parser, syntax),
         TokenType::KeywordConst | TokenType::KeywordLet | TokenType::KeywordVar => {
             parse_stmt_var(scope, parser, syntax)
         }
-        TokenType::KeywordContinue => parse_stmt_continue(scope, parser),
+        TokenType::KeywordContinue => parse_stmt_continue(scope, parser, syntax),
+        TokenType::KeywordDebugger => parse_stmt_debugger(scope, parser),
         TokenType::KeywordDo => parse_stmt_do_while(scope, parser, syntax),
         TokenType::KeywordExport => parse_stmt_export(scope, parser, syntax),
         TokenType::KeywordFor => parse_stmt_for(scope, parser, syntax),
@@ -112,33 +113,51 @@ struct BreakOrContinue {
     label: Option<SourceRange>,
 }
 
-fn parse_stmt_break_or_continue(parser: &mut Parser, t: TokenType) -> TsResult<BreakOrContinue> {
+fn parse_stmt_break_or_continue(
+    parser: &mut Parser,
+    t: TokenType,
+    syntax: &ParsePatternSyntax,
+) -> TsResult<BreakOrContinue> {
     let mut loc = parser.require(t)?.loc_take();
     let next = parser.peek()?;
-    let label = if next.typ() == TokenType::Identifier && !next.preceded_by_line_terminator() {
-        // Label.
-        parser.consume_peeked();
-        loc.extend(next.loc());
-        Some(next.loc_take())
-    } else if next.typ() == TokenType::Semicolon {
-        parser.consume_peeked();
-        None
-    } else if next.preceded_by_line_terminator() {
-        None
-    } else {
-        return Err(next.error(SyntaxErrorType::ExpectedSyntax("continue label")));
-    };
+    let label =
+        if is_valid_pattern_identifier(next.typ(), syntax) && !next.preceded_by_line_terminator() {
+            // Label.
+            parser.consume_peeked();
+            loc.extend(next.loc());
+            Some(next.loc_take())
+        } else if next.typ() == TokenType::Semicolon {
+            parser.consume_peeked();
+            None
+        } else if next.preceded_by_line_terminator() {
+            None
+        } else {
+            return Err(next.error(SyntaxErrorType::ExpectedSyntax("continue label")));
+        };
     Ok(BreakOrContinue { loc, label })
 }
 
-pub fn parse_stmt_break(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId> {
-    let stmt = parse_stmt_break_or_continue(parser, TokenType::KeywordBreak)?;
+pub fn parse_stmt_break(
+    scope: ScopeId,
+    parser: &mut Parser,
+    syntax: &ParsePatternSyntax,
+) -> TsResult<NodeId> {
+    let stmt = parse_stmt_break_or_continue(parser, TokenType::KeywordBreak, syntax)?;
     Ok(parser.create_node(scope, stmt.loc, Syntax::BreakStmt { label: stmt.label }))
 }
 
-pub fn parse_stmt_continue(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId> {
-    let stmt = parse_stmt_break_or_continue(parser, TokenType::KeywordContinue)?;
+pub fn parse_stmt_continue(
+    scope: ScopeId,
+    parser: &mut Parser,
+    syntax: &ParsePatternSyntax,
+) -> TsResult<NodeId> {
+    let stmt = parse_stmt_break_or_continue(parser, TokenType::KeywordContinue, syntax)?;
     Ok(parser.create_node(scope, stmt.loc, Syntax::ContinueStmt { label: stmt.label }))
+}
+
+pub fn parse_stmt_debugger(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId> {
+    let mut loc = parser.require(TokenType::KeywordDebugger)?.loc_take();
+    Ok(parser.create_node(scope, loc, Syntax::DebuggerStmt {}))
 }
 
 pub fn parse_stmt_export(

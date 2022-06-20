@@ -110,7 +110,7 @@ pub enum TokenType {
     LiteralRegex,
     LiteralString,
     LiteralTemplatePartString,
-    LiteralTemplatePartSubstitution,
+    LiteralTemplatePartStringEnd,
     LiteralTrue,
     LiteralUndefined,
     ParenthesisClose,

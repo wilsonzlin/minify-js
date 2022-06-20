@@ -1,12 +1,24 @@
 use crate::{
     ast::{
         ArrayElement, ClassOrObjectMemberKey, ClassOrObjectMemberValue, ForInOfStmtHeaderLhs,
-        ForStmtHeader, ForThreeInit, NodeData, NodeId, NodeMap, ObjectMemberType, Syntax,
+        ForStmtHeader, ForThreeInit, LiteralTemplatePart, NodeData, NodeId, NodeMap,
+        ObjectMemberType, Syntax,
     },
     char::{ID_CONTINUE_CHARSTR, ID_START_CHARSTR},
+    lex::KEYWORD_STRS,
     source::{Source, SourceRange},
     symbol::ScopeMap,
+    update::NodeUpdates,
 };
+
+const ALT_MINIFIED_NAMES: &'static [char] = &[
+    '\u{02B0}', '\u{02B1}', '\u{02B2}', '\u{02B3}', '\u{02B4}', '\u{02B5}', '\u{02B6}', '\u{02B7}',
+    '\u{02B8}', '\u{02B9}', '\u{02BA}', '\u{02BB}', '\u{02BC}', '\u{02BD}', '\u{02BE}', '\u{02BF}',
+    '\u{02C0}', '\u{02C1}', '\u{02C6}', '\u{02C7}', '\u{02C8}', '\u{02C9}', '\u{02CA}', '\u{02CB}',
+    '\u{02CC}', '\u{02CD}', '\u{02CE}', '\u{02CF}', '\u{02D0}', '\u{02D1}', '\u{02E0}', '\u{02E1}',
+    '\u{02E2}', '\u{02E3}', '\u{02E4}', '\u{02EC}', '\u{02EE}', '\u{0374}', '\u{037A}', '\u{0559}',
+    '\u{0640}', '\u{06E5}', '\u{06E6}', '\u{07F4}', '\u{07F5}', '\u{07FA}',
+];
 
 fn generate_minified_name(mut id: usize) -> SourceRange {
     let mut name = vec![ID_START_CHARSTR[id % ID_START_CHARSTR.len()]];
@@ -18,25 +30,21 @@ fn generate_minified_name(mut id: usize) -> SourceRange {
         }
         name.push(ID_CONTINUE_CHARSTR[id % ID_CONTINUE_CHARSTR.len()]);
     };
+    if let Some(alt_id) = KEYWORD_STRS.get(name.as_slice()) {
+        // This name is a keyword, so we replace it with a Unicode character instead.
+        // This Unicode character is 2 bytes when encoded in UTF-8, so it's more than minimal enough. UTF-8 encodes U+0080 to U+07FF in 2 bytes.
+        // There should be at least one ALT_MINIFIED_NAMES element for each keyword.
+        // Using a Unicode name will ensure no chance of clashing with keywords, well-knowns, and almost all variables.
+        // Clashes can appear quickly e.g. `in`, `of`, `if`.
+        let s = ALT_MINIFIED_NAMES[*alt_id].encode_utf8(&mut name).len();
+        name.truncate(s);
+    };
     let end = name.len();
     SourceRange {
         source: Source::new(name),
         start: 0,
         end,
     }
-}
-
-// Rust won't let us iterate the tree, matching and exploring, while also making the occasional mutation of nodes or subtrees during this iterating. Therefore, we use an update list that we'll apply after the iteration finishes.
-
-struct NodeUpdate {
-    // If this is outside the range of NodeMap, it's a new node that needs to be inserted into the NodeMap.
-    node_id: NodeId,
-    new_data: NodeData,
-}
-
-struct NodeUpdates {
-    updates: Vec<NodeUpdate>,
-    next_new_node_id: usize,
 }
 
 fn visit_class_or_object_key(
@@ -97,22 +105,20 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
             let sym = scope.find_symbol(s, name);
             if let Some(sym) = sym {
                 let minified = generate_minified_name(sym.minified_name_id());
-                updates.updates.push(NodeUpdate {
-                    node_id: n,
-                    new_data: NodeData::new(
-                        scope_id,
-                        minified.clone(),
-                        match stx {
-                            Syntax::IdentifierPattern { .. } => Syntax::IdentifierPattern {
-                                name: minified.clone(),
-                            },
-                            Syntax::ClassOrFunctionName { .. } => Syntax::ClassOrFunctionName {
-                                name: minified.clone(),
-                            },
-                            _ => unreachable!(),
+                updates.replace_node(
+                    n,
+                    scope_id,
+                    minified.clone(),
+                    match stx {
+                        Syntax::IdentifierPattern { .. } => Syntax::IdentifierPattern {
+                            name: minified.clone(),
                         },
-                    ),
-                })
+                        Syntax::ClassOrFunctionName { .. } => Syntax::ClassOrFunctionName {
+                            name: minified.clone(),
+                        },
+                        _ => unreachable!(),
+                    },
+                );
             };
         }
         Syntax::ArrayPattern { elements, rest } => {
@@ -184,7 +190,7 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
                 visit_class_or_object_value(s, m, updates, &member.value);
             }
         }
-        Syntax::ComputedMemberExpr { object, member } => {
+        Syntax::ComputedMemberExpr { object, member, .. } => {
             visit_node(s, m, updates, *object);
             visit_node(s, m, updates, *member);
         }
@@ -259,16 +265,14 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
             let sym = scope.find_symbol(s, name);
             if let Some(sym) = sym {
                 let minified = generate_minified_name(sym.minified_name_id());
-                updates.updates.push(NodeUpdate {
-                    node_id: n,
-                    new_data: NodeData::new(
-                        scope_id,
-                        minified.clone(),
-                        Syntax::IdentifierExpr {
-                            name: minified.clone(),
-                        },
-                    ),
-                })
+                updates.replace_node(
+                    n,
+                    scope_id,
+                    minified.clone(),
+                    Syntax::IdentifierExpr {
+                        name: minified.clone(),
+                    },
+                );
             };
         }
         Syntax::IfStmt {
@@ -307,6 +311,14 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
         }
         Syntax::LiteralRegexExpr {} => {}
         Syntax::LiteralStringExpr { .. } => {}
+        Syntax::LiteralTemplateExpr { parts } => {
+            for p in parts {
+                match p {
+                    LiteralTemplatePart::Substitution(expr) => visit_node(s, m, updates, *expr),
+                    LiteralTemplatePart::String(_) => {}
+                }
+            }
+        }
         Syntax::LiteralUndefined {} => {}
         Syntax::ObjectPattern { properties, rest } => {
             for p in properties {
@@ -327,31 +339,23 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
                         let sym = scope.find_symbol(s, name);
                         if let Some(sym) = sym {
                             let minified = generate_minified_name(sym.minified_name_id());
-                            let replacement_target_node_id = updates.next_new_node_id;
-                            updates.next_new_node_id += 1;
-                            let replacement_target_node = NodeData::new(
+                            let replacement_target_node = updates.create_node(
                                 scope_id,
                                 minified.clone(),
                                 Syntax::IdentifierPattern {
                                     name: minified.clone(),
                                 },
                             );
-                            updates.updates.push(NodeUpdate {
-                                node_id: NodeId::new(replacement_target_node_id),
-                                new_data: replacement_target_node,
-                            });
-                            updates.updates.push(NodeUpdate {
-                                node_id: n,
-                                new_data: NodeData::new(
-                                    scope_id,
-                                    minified.clone(),
-                                    Syntax::ObjectPatternProperty {
-                                        key: key.clone(),
-                                        target: Some(NodeId::new(replacement_target_node_id)),
-                                        default_value: default_value.clone(),
-                                    },
-                                ),
-                            });
+                            updates.replace_node(
+                                n,
+                                scope_id,
+                                minified.clone(),
+                                Syntax::ObjectPatternProperty {
+                                    key: key.clone(),
+                                    target: Some(replacement_target_node),
+                                    default_value: default_value.clone(),
+                                },
+                            );
                         };
                     }
                 }
@@ -447,45 +451,39 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
                     let sym = scope.find_symbol(s, name);
                     if let Some(sym) = sym {
                         let minified = generate_minified_name(sym.minified_name_id());
-                        let replacement_initializer_node_id = updates.next_new_node_id;
-                        updates.next_new_node_id += 1;
-                        let replacement_initializer_node = NodeData::new(
+                        let replacement_initializer_node = updates.create_node(
                             scope_id,
                             minified.clone(),
                             Syntax::IdentifierExpr {
                                 name: minified.clone(),
                             },
                         );
-                        updates.updates.push(NodeUpdate {
-                            node_id: NodeId::new(replacement_initializer_node_id),
-                            new_data: replacement_initializer_node,
-                        });
-                        updates.updates.push(NodeUpdate {
-                            node_id: n,
-                            new_data: NodeData::new(
-                                scope_id,
-                                minified.clone(),
-                                Syntax::ObjectMember {
-                                    typ: ObjectMemberType::Valued {
-                                        key: ClassOrObjectMemberKey::Direct(name.clone()),
-                                        value: ClassOrObjectMemberValue::Property {
-                                            initializer: Some(NodeId::new(
-                                                replacement_initializer_node_id,
-                                            )),
-                                        },
+                        updates.replace_node(
+                            n,
+                            scope_id,
+                            minified.clone(),
+                            Syntax::ObjectMember {
+                                typ: ObjectMemberType::Valued {
+                                    key: ClassOrObjectMemberKey::Direct(name.clone()),
+                                    value: ClassOrObjectMemberValue::Property {
+                                        initializer: Some(replacement_initializer_node),
                                     },
                                 },
-                            ),
-                        });
+                            },
+                        );
                     };
                 }
                 ObjectMemberType::Rest { value } => todo!(),
             };
         }
-        Syntax::MemberAccessExpr { left, .. } => {
+        Syntax::MemberExpr { left, .. } => {
             visit_node(s, m, updates, *left);
         }
         Syntax::LabelStmt { name } => {}
+        Syntax::CallArg { value, .. } => {
+            visit_node(s, m, updates, *value);
+        }
+        Syntax::SuperExpr {} => {}
     };
 }
 
@@ -510,10 +508,7 @@ pub fn minify_js(
         minified_name_starts[id] = minified_name_start;
     }
 
-    let mut node_updates = NodeUpdates {
-        updates: Vec::new(),
-        next_new_node_id: node_map.len(),
-    };
+    let mut node_updates = NodeUpdates::new(node_map);
     match node_map[top_level_node_id].stx() {
         Syntax::TopLevel { body } => {
             for n in body.iter() {
@@ -522,11 +517,5 @@ pub fn minify_js(
         }
         _ => panic!("not top level"),
     };
-    for u in node_updates.updates {
-        if u.node_id.id() == node_map.len() {
-            node_map.push(u.new_data)
-        } else {
-            node_map[u.node_id] = u.new_data;
-        }
-    }
+    node_updates.apply_updates(node_map);
 }

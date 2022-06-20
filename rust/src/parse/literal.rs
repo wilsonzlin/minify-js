@@ -12,9 +12,10 @@ use crate::token::TokenType;
 use super::pattern::ParsePatternSyntax;
 
 fn parse_radix(raw: &str, radix: u32) -> Result<f64, ()> {
-    u32::from_str_radix(raw, radix)
+    u64::from_str_radix(raw, radix)
         .map_err(|_| ())
-        .and_then(|v| f64::try_from(v).map_err(|_| ()))
+        // TODO This is lossy, but there is no TryFrom for converting from u64 to f64, and u32 cannot represent all possible JS values.
+        .map(|v| v as f64)
 }
 
 pub fn normalise_literal_number(raw: &SourceRange) -> TsResult<JsNumber> {

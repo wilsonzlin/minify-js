@@ -90,8 +90,20 @@ impl Parser {
         }
     }
 
+    pub fn lexer_mut(&mut self) -> &mut Lexer {
+        &mut self.lexer
+    }
+
     pub fn create_node(&mut self, scope: ScopeId, loc: SourceRange, stx: Syntax) -> NodeId {
         self.node_map.create_node(scope, loc, stx)
+    }
+
+    pub fn node_map(&mut self) -> &NodeMap {
+        &self.node_map
+    }
+
+    pub fn node_map_mut(&mut self) -> &mut NodeMap {
+        &mut self.node_map
     }
 
     pub fn scope_map_mut(&mut self) -> &mut ScopeMap {
@@ -131,6 +143,11 @@ impl Parser {
     pub fn restore_checkpoint(&mut self, checkpoint: ParserCheckpoint) -> () {
         self.buffered = None;
         self.lexer.apply_checkpoint(checkpoint.checkpoint);
+    }
+
+    // Useful if lexer was altered outside parser.
+    pub fn clear_buffered(&mut self) -> () {
+        self.buffered = None;
     }
 
     fn forward<K: FnOnce(&Token) -> bool>(&mut self, mode: LexMode, keep: K) -> TsResult<Token> {

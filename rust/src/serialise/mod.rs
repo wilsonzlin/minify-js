@@ -2,7 +2,7 @@ use serde_json::{json, Value};
 
 use crate::ast::{
     ArrayElement, ClassOrObjectMemberKey, ClassOrObjectMemberValue, ForInOfStmtHeaderLhs,
-    ForStmtHeader, ForThreeInit, NodeId, NodeMap, ObjectMemberType, Syntax,
+    ForStmtHeader, ForThreeInit, LiteralTemplatePart, NodeId, NodeMap, ObjectMemberType, Syntax,
 };
 
 fn visit_node(m: &NodeMap, n: NodeId) -> Value {
@@ -92,10 +92,12 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
         }),
         Syntax::CallExpr {
             parenthesised,
+            optional_chaining,
             callee,
             arguments,
         } => json!({
             "$t": "CallExpr",
+            "optional_chaining": "optional_chaining",
             "parenthesised": parenthesised,
             "callee": visit_node(m, *callee),
             "arguments": arguments.iter().map(|n| visit_node(m, *n)).collect::<Vec<_>>(),
@@ -112,8 +114,13 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
             "consequent": visit_node(m, *consequent),
             "alternate": visit_node(m, *alternate),
         }),
-        Syntax::ComputedMemberExpr { object, member } => json!({
+        Syntax::ComputedMemberExpr {
+            optional_chaining,
+            object,
+            member,
+        } => json!({
             "$t": "ComputedMemberExpr",
+            "optional_chaining": "optional_chaining",
             "object": visit_node(m, *object),
             "member": visit_node(m, *member),
         }),
@@ -172,6 +179,17 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
         Syntax::LiteralStringExpr { value } => json!({
             "$t": "LiteralStringExpr",
             "value": value.as_str().to_string(),
+        }),
+        Syntax::LiteralTemplateExpr { parts } => json!({
+            "$t": "LiteralTemplateExpr",
+            "parts": parts.iter().map(|p| match p {
+              LiteralTemplatePart::String(string) => json!({
+                  "string": string.as_str().to_string(),
+              }),
+              LiteralTemplatePart::Substitution(sub) => json!({
+                  "substitution": visit_node(m, *sub),
+              }),
+            }).collect::<Vec<_>>(),
         }),
         Syntax::LiteralUndefined {} => json!({
             "$t": "LiteralUndefined",
@@ -386,17 +404,25 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
             "target": target.map(|n| visit_node(m, n)),
             "default": default_value.map(|n| visit_node(m, n)),
         }),
-        Syntax::MemberAccessExpr {
+        Syntax::MemberExpr {
             parenthesised,
             optional_chaining,
             left,
             right,
         } => json!({
-            "$t": "MemberAccessExpr",
+            "$t": "MemberExpr",
             "parenthesised": parenthesised,
             "optional_chaining": optional_chaining,
             "left": visit_node(m, *left),
             "right": right.as_str().to_string(),
+        }),
+        Syntax::CallArg { spread, value } => json!({
+            "$t": "CallArg",
+            "spread": spread,
+            "value": visit_node(m, *value),
+        }),
+        Syntax::SuperExpr {} => json!({
+            "$t": "SuperExpr",
         }),
     }
 }

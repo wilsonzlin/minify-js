@@ -1,11 +1,12 @@
 use crate::ast::{
     ArrayElement, ClassMember, ClassOrObjectMemberKey, ClassOrObjectMemberValue,
-    ForInOfStmtHeaderLhs, ForStmtHeader, ForThreeInit, NodeId, NodeMap, ObjectMemberType, Syntax,
-    VarDeclMode,
+    ForInOfStmtHeaderLhs, ForStmtHeader, ForThreeInit, LiteralTemplatePart, NodeId, NodeMap,
+    ObjectMemberType, Syntax, VarDeclMode,
 };
 use crate::operator::{OperatorName, OPERATORS};
 use lazy_static::lazy_static;
 use std::io::Write;
+use std::option;
 use std::{collections::HashMap, io};
 
 #[cfg(test)]
@@ -211,12 +212,32 @@ fn emit_js_under_operator<T: Write>(
     parent_operator_precedence: Option<u8>,
 ) -> io::Result<()> {
     match map[node_id].stx() {
-        Syntax::EmptyStmt {} => {}
+        Syntax::EmptyStmt {} => {
+            // It is often still required to output the semicolon e.g. `if (x); else if (y); else ;`.
+            // TODO Omit when possible.
+            out.write_all(b";")?;
+        }
         Syntax::LiteralBooleanExpr { .. }
         | Syntax::LiteralNumberExpr { .. }
         | Syntax::LiteralRegexExpr { .. }
         | Syntax::LiteralStringExpr { .. } => {
             out.write_all(map[node_id].loc().as_slice())?;
+        }
+        Syntax::LiteralTemplateExpr { parts } => {
+            out.write_all(b"`")?;
+            for p in parts {
+                match p {
+                    LiteralTemplatePart::Substitution(sub) => {
+                        out.write_all(b"${")?;
+                        emit_js(out, map, *sub)?;
+                        out.write_all(b"}")?;
+                    }
+                    LiteralTemplatePart::String(str) => {
+                        out.write_all(str.as_slice())?;
+                    }
+                }
+            }
+            out.write_all(b"`")?;
         }
         Syntax::VarDecl { mode, declarators } => {
             out.write_all(match mode {
@@ -376,6 +397,9 @@ fn emit_js_under_operator<T: Write>(
             let must_parenthesise = match parent_operator_precedence {
                 Some(po) if po > operator.precedence => true,
                 Some(po) if po == operator.precedence => *parenthesised,
+                // Needed to prevent an expression statement with an assignment to an object pattern from being interpreted as a block when unwrapped.
+                // TODO Omit when possible.
+                None if *operator_name == OperatorName::Assignment => *parenthesised,
                 _ => false,
             };
             if must_parenthesise {
@@ -388,22 +412,41 @@ fn emit_js_under_operator<T: Write>(
                     .unwrap()
                     .as_bytes(),
             )?;
+            match operator_name {
+                OperatorName::Addition | OperatorName::Subtraction => {
+                    // Prevent potential confict with following unary operator e.g. `a+ +b` => `a++b`.
+                    // TODO Omit when possible.
+                    out.write_all(b" ")?;
+                }
+                _ => {}
+            };
             emit_js_under_operator(out, map, *right, Some(operator.precedence))?;
             if must_parenthesise {
                 out.write_all(b")")?;
             };
         }
         Syntax::CallExpr {
+            optional_chaining,
             parenthesised,
             callee,
             arguments,
         } => {
-            // We need to keep parentheses to prevent function expressions from being misinterpreted as a function declaration, which cannot be part of an expression e.g. IIFE.
-            // TODO Omit parentheses if possible.
-            if *parenthesised {
+            let operator = &OPERATORS[&OperatorName::Call];
+            let must_parenthesise = match parent_operator_precedence {
+                Some(po) if po > operator.precedence => true,
+                Some(po) if po == operator.precedence => *parenthesised,
+                // We need to keep parentheses to prevent function expressions from being misinterpreted as a function declaration, which cannot be part of an expression e.g. IIFE.
+                // TODO Omit parentheses if possible.
+                None => *parenthesised,
+                _ => false,
+            };
+            if must_parenthesise {
                 out.write_all(b"(")?;
             }
             emit_js(out, map, *callee)?;
+            if *optional_chaining {
+                out.write_all(b"?.")?;
+            }
             out.write_all(b"(")?;
             for (i, a) in arguments.iter().enumerate() {
                 if i > 0 {
@@ -413,7 +456,7 @@ fn emit_js_under_operator<T: Write>(
             }
             out.write_all(b")")?;
             // TODO Omit parentheses if possible.
-            if *parenthesised {
+            if must_parenthesise {
                 out.write_all(b")")?;
             }
         }
@@ -432,11 +475,11 @@ fn emit_js_under_operator<T: Write>(
             if must_parenthesise {
                 out.write_all(b"(")?;
             };
-            emit_js(out, map, *test)?;
+            emit_js_under_operator(out, map, *test, Some(operator.precedence))?;
             out.write_all(b"?")?;
-            emit_js(out, map, *consequent)?;
+            emit_js_under_operator(out, map, *consequent, Some(operator.precedence))?;
             out.write_all(b":")?;
-            emit_js(out, map, *alternate)?;
+            emit_js_under_operator(out, map, *alternate, Some(operator.precedence))?;
             if must_parenthesise {
                 out.write_all(b")")?;
             };
@@ -461,7 +504,7 @@ fn emit_js_under_operator<T: Write>(
                 if !generator {
                     out.write_all(b" ")?;
                 };
-                emit_js(out, map, *name);
+                emit_js(out, map, *name)?;
             };
             out.write_all(b"(")?;
             emit_js(out, map, *signature)?;
@@ -582,13 +625,20 @@ fn emit_js_under_operator<T: Write>(
         Syntax::DebuggerStmt {} => {
             out.write_all(b"debugger")?;
         }
-        Syntax::ComputedMemberExpr { object, member } => {
+        Syntax::ComputedMemberExpr {
+            optional_chaining,
+            object,
+            member,
+        } => {
             emit_js_under_operator(
                 out,
                 map,
                 *object,
                 Some(OPERATORS[&OperatorName::ComputedMemberAccess].precedence),
             )?;
+            if *optional_chaining {
+                out.write_all(b"?.")?;
+            };
             out.write_all(b"[")?;
             emit_js(out, map, *member)?;
             out.write_all(b"]")?;
@@ -785,7 +835,7 @@ fn emit_js_under_operator<T: Write>(
                 }
             };
         }
-        Syntax::MemberAccessExpr {
+        Syntax::MemberExpr {
             parenthesised,
             optional_chaining,
             left,
@@ -837,6 +887,15 @@ fn emit_js_under_operator<T: Write>(
         Syntax::LabelStmt { name } => {
             out.write_all(name.as_slice())?;
             out.write_all(b":")?;
+        }
+        Syntax::CallArg { spread, value } => {
+            if *spread {
+                out.write_all(b"...")?;
+            }
+            emit_js(out, map, *value)?;
+        }
+        Syntax::SuperExpr {} => {
+            out.write_all(b"super")?;
         }
     };
     Ok(())
