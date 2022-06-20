@@ -1,0 +1,30 @@
+{
+  "$t": "ArrowFunctionExpr",
+  "signature": {
+    "$t": "FunctionSignature",
+    "parameters": [
+      {
+        "$t": "ParamDecl",
+        "rest": false,
+        "pattern": {"$t": "IdentifierPattern", "name": "a"},
+        "default_value": null
+      },
+      {
+        "$t": "ParamDecl",
+        "rest": false,
+        "pattern": {"$t": "IdentifierPattern", "name": "b"},
+        "default_value": null
+      },
+      {
+        "$t": "ParamDecl",
+        "rest": false,
+        "pattern": {"$t": "IdentifierPattern", "name": "c"},
+        "default_value": null
+      }
+    ]
+  },
+  "body": {
+    "$t": "BlockStmt",
+    "body": []
+  }
+}

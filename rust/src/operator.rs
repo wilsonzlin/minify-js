@@ -2,9 +2,10 @@ use crate::operator::Arity::*;
 use crate::operator::Associativity::*;
 use crate::operator::OperatorName::*;
 use lazy_static::lazy_static;
+use serde::Serialize;
 use std::collections::HashMap;
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Serialize)]
 pub enum OperatorName {
     Addition,
     Assignment,
@@ -53,7 +54,9 @@ pub enum OperatorName {
     Multiplication,
     New,
     NullishCoalescing,
-    OptionalChaining,
+    OptionalChainingMemberAccess,
+    OptionalChainingComputedMemberAccess,
+    OptionalChainingCall,
     PostfixDecrement,
     PostfixIncrement,
     PrefixDecrement,
@@ -96,7 +99,9 @@ const PRECEDENCE_LEVELS: &'static [&'static [(OperatorName, Arity, Associativity
         (ComputedMemberAccess, Binary, Left),
         (Call, Binary, Left),
         (New, Unary, Right),
-        (OptionalChaining, Binary, Left),
+        (OptionalChainingMemberAccess, Binary, Left),
+        (OptionalChainingComputedMemberAccess, Binary, Left),
+        (OptionalChainingCall, Binary, Left),
     ],
     &[
         (PostfixIncrement, Unary, Left),

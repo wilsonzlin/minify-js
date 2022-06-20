@@ -1,0 +1,20 @@
+{
+  "$t": "UnaryExpr",
+  "parenthesised": false,
+  "operator": "UnaryPlus",
+  "argument": {
+    "$t": "UnaryExpr",
+    "parenthesised": false,
+    "operator": "New",
+    "argument": {
+      "$t": "MemberAccessExpr",
+      "parenthesised": false,
+      "optional_chaining": true,
+      "left": {
+        "$t": "IdentifierExpr",
+        "name": "abc"
+      },
+      "right": "def"
+    }
+  }
+}

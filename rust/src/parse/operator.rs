@@ -50,7 +50,9 @@ lazy_static! {
         map.insert(TokenType::Dot, &OPERATORS[&OperatorName::MemberAccess]);
         map.insert(TokenType::Asterisk, &OPERATORS[&OperatorName::Multiplication]);
         map.insert(TokenType::QuestionQuestion, &OPERATORS[&OperatorName::NullishCoalescing]);
-        map.insert(TokenType::QuestionDot, &OPERATORS[&OperatorName::OptionalChaining]);
+        map.insert(TokenType::QuestionDot, &OPERATORS[&OperatorName::OptionalChainingMemberAccess]);
+        map.insert(TokenType::QuestionDotBracketOpen, &OPERATORS[&OperatorName::OptionalChainingComputedMemberAccess]);
+        map.insert(TokenType::QuestionDotParenthesisOpen, &OPERATORS[&OperatorName::OptionalChainingCall]);
         map.insert(TokenType::Percent, &OPERATORS[&OperatorName::Remainder]);
         map.insert(TokenType::EqualsEqualsEquals, &OPERATORS[&OperatorName::StrictEquality]);
         map.insert(TokenType::ExclamationEqualsEquals, &OPERATORS[&OperatorName::StrictInequality]);

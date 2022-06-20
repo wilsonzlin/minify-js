@@ -1,12 +1,14 @@
-use crate::ast::{Node, Syntax, VarDeclMode, VariableDeclarator};
+use crate::ast::{NodeId, Syntax, VarDeclMode, VariableDeclarator};
 use crate::error::{SyntaxErrorType, TsResult};
 use crate::parse::parser::Parser;
 use crate::parse::pattern::parse_pattern;
 use crate::parse::signature::parse_signature_function;
 use crate::parse::stmt::parse_stmt_block;
+use crate::symbol::{ScopeId, ScopeType, Symbol};
 use crate::token::TokenType;
 
 use super::expr::{parse_expr_until_either_with_asi, Asi};
+use super::pattern::ParsePatternAction;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum VarDeclParseMode {
@@ -16,7 +18,11 @@ pub enum VarDeclParseMode {
     Leftmost,
 }
 
-pub fn parse_decl_var(parser: &mut Parser, parse_mode: VarDeclParseMode) -> TsResult<Node> {
+pub fn parse_decl_var(
+    scope: ScopeId,
+    parser: &mut Parser,
+    parse_mode: VarDeclParseMode,
+) -> TsResult<NodeId> {
     let t = parser.next()?;
     let mode = match t.typ() {
         TokenType::KeywordLet => VarDeclMode::Let,
@@ -27,20 +33,28 @@ pub fn parse_decl_var(parser: &mut Parser, parse_mode: VarDeclParseMode) -> TsRe
     let mut declarators = vec![];
     let mut loc = t.loc().clone();
     loop {
-        let pattern = parse_pattern(parser)?;
-        loc.extend(pattern.loc());
+        let pattern = parse_pattern(
+            scope,
+            parser,
+            match mode {
+                VarDeclMode::Var => ParsePatternAction::AddToClosureScope,
+                _ => ParsePatternAction::AddToBlockScope,
+            },
+        )?;
+        loc.extend(parser[pattern].loc());
         let mut asi = match parse_mode {
             VarDeclParseMode::Asi => Asi::can(),
             VarDeclParseMode::Leftmost => Asi::no(),
         };
         let initializer = if parser.consume_if(TokenType::Equals)?.is_match() {
             let expr = parse_expr_until_either_with_asi(
+                scope,
                 parser,
                 TokenType::Semicolon,
                 TokenType::Comma,
                 &mut asi,
             )?;
-            loc.extend(expr.loc());
+            loc.extend(parser[expr].loc());
             Some(expr)
         } else {
             None
@@ -63,18 +77,26 @@ pub fn parse_decl_var(parser: &mut Parser, parse_mode: VarDeclParseMode) -> TsRe
             }
         }
     }
-    Ok(Node::new(loc, Syntax::VarDecl { mode, declarators }))
+    Ok(parser.create_node(scope, loc, Syntax::VarDecl { mode, declarators }))
 }
 
-pub fn parse_decl_function(parser: &mut Parser) -> TsResult<Node> {
+pub fn parse_decl_function(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId> {
+    let fn_scope = parser.create_child_scope(scope, ScopeType::Closure);
     let start = parser.require(TokenType::KeywordFunction)?.loc().clone();
     let name = parser.require(TokenType::Identifier)?.loc().clone();
-    let signature = parse_signature_function(parser)?;
-    let body = parse_stmt_block(parser)?;
-    Ok(Node::new(
-        &start + body.loc(),
+    let name_node = parser.create_node(
+        fn_scope,
+        name.clone(),
+        Syntax::FunctionName { name: name.clone() },
+    );
+    parser[scope].add_symbol(name.clone(), Symbol::new(name_node))?;
+    let signature = parse_signature_function(fn_scope, parser)?;
+    let body = parse_stmt_block(fn_scope, parser)?;
+    Ok(parser.create_node(
+        scope,
+        &start + parser[body].loc(),
         Syntax::FunctionDecl {
-            name,
+            name: name_node,
             signature,
             body,
         },

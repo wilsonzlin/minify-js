@@ -1,0 +1,16 @@
+{
+  "$t": "ConditionalExpr",
+  "parenthesised": false,
+  "test": {
+    "$t": "IdentifierExpr",
+    "name": "a"
+  },
+  "consequent": {
+    "$t": "IdentifierExpr",
+    "name": "b"
+  },
+  "alternate": {
+    "$t": "IdentifierExpr",
+    "name": "c"
+  }
+}

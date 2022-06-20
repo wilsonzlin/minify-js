@@ -1,0 +1,36 @@
+{
+  "$t": "UnaryExpr",
+  "parenthesised": false,
+  "operator": "LogicalNot",
+  "argument": {
+    "$t": "UnaryExpr",
+    "parenthesised": false,
+    "operator": "LogicalNot",
+    "argument": {
+      "$t": "UnaryExpr",
+      "parenthesised": false,
+      "operator": "PrefixIncrement",
+      "argument": {
+        "$t": "UnaryExpr",
+        "parenthesised": false,
+        "operator": "BitwiseNot",
+        "argument": {
+          "$t": "MemberAccessExpr",
+          "parenthesised": false,
+          "optional_chaining": false,
+          "right": "ghi",
+          "left": {
+            "$t": "MemberAccessExpr",
+            "parenthesised": false,
+            "optional_chaining": true,
+            "left": {
+              "$t": "IdentifierExpr",
+              "name": "abc"
+            },
+            "right": "def"
+          }
+        }
+      }
+    }
+  }
+}

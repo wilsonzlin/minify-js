@@ -6,6 +6,7 @@ use crate::num::JsNumber;
 use crate::parse::expr::parse_expr;
 use crate::parse::parser::Parser;
 use crate::source::SourceRange;
+use crate::symbol::ScopeId;
 use crate::token::TokenType;
 
 fn parse_radix(raw: &str, radix: u32) -> Result<f64, ()> {
@@ -38,9 +39,12 @@ pub fn parse_and_normalise_literal_string(parser: &mut Parser) -> TsResult<Strin
     Ok(s)
 }
 
-pub fn parse_class_or_object_member_key(parser: &mut Parser) -> TsResult<ClassOrObjectMemberKey> {
+pub fn parse_class_or_object_member_key(
+    scope: ScopeId,
+    parser: &mut Parser,
+) -> TsResult<ClassOrObjectMemberKey> {
     Ok(if parser.consume_if(TokenType::BracketOpen)?.is_match() {
-        let expr = parse_expr(parser, TokenType::BracketClose)?;
+        let expr = parse_expr(scope, parser, TokenType::BracketClose)?;
         parser.require(TokenType::BracketClose)?;
         ClassOrObjectMemberKey::Computed(expr)
     } else {

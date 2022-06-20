@@ -1,11 +1,15 @@
-use crate::ast::{Node, Syntax};
+use crate::ast::{NodeId, Syntax};
 use crate::error::TsResult;
 use crate::parse::expr::parse_expr_until_either;
 use crate::parse::parser::Parser;
 use crate::parse::pattern::parse_pattern;
+use crate::symbol::ScopeId;
 use crate::token::TokenType;
 
-pub fn parse_signature_function(parser: &mut Parser) -> TsResult<Node> {
+use super::pattern::ParsePatternAction;
+
+// `scope` should be a newly created closure scope for this function.
+pub fn parse_signature_function(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId> {
     let start_pos = parser.checkpoint();
 
     let mut parameters = Vec::new();
@@ -16,14 +20,15 @@ pub fn parse_signature_function(parser: &mut Parser) -> TsResult<Node> {
         };
 
         let rest = parser.consume_if(TokenType::DotDotDot)?.is_match();
-        let pattern = parse_pattern(parser)?;
+        let pattern = parse_pattern(scope, parser, ParsePatternAction::AddToClosureScope)?;
         let default_value = parser.consume_if(TokenType::Equals)?.and_then(|| {
-            parse_expr_until_either(parser, TokenType::Comma, TokenType::ParenthesisClose)
+            parse_expr_until_either(scope, parser, TokenType::Comma, TokenType::ParenthesisClose)
         })?;
 
         // TODO Location
-        parameters.push(Node::new(
-            pattern.loc().clone(),
+        parameters.push(parser.create_node(
+            scope,
+            parser[pattern].loc().clone(),
             Syntax::ParamDecl {
                 rest,
                 pattern,
@@ -37,7 +42,8 @@ pub fn parse_signature_function(parser: &mut Parser) -> TsResult<Node> {
         };
     }
 
-    Ok(Node::new(
+    Ok(parser.create_node(
+        scope,
         parser.since_checkpoint(start_pos),
         Syntax::FunctionSignature { parameters },
     ))

@@ -61,7 +61,7 @@ impl Debug for SourceRange {
         if self.is_eof() {
             Ok(())
         } else {
-            f.write_str(self.as_str())
+            f.write_str(&format!("`{}`[{}:{}]", self.as_str(), self.start, self.end))
         }
     }
 }

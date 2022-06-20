@@ -1,19 +1,132 @@
 use std::fmt;
 use std::fmt::{Debug, Formatter};
+use std::ops::{Index, IndexMut};
+
+use serde::Serialize;
 
 use crate::error::{SyntaxError, SyntaxErrorType};
 use crate::num::JsNumber;
 use crate::operator::OperatorName;
 use crate::source::SourceRange;
+use crate::symbol::ScopeId;
+
+pub struct NodeData {
+    loc: SourceRange,
+    stx: Syntax,
+    // For the purposes of disambiguation, the scope of a function or block is only set on its children and not itself. This is merely an arbitrary decision. For example, the scope created by a function is assigned to its signature nodes (and descendants e.g. default values), but not to the FunctionStmt itself. For a `for` loop, the scope created by it is assigned to its header nodes and descendants, but not to the ForStmt itself. For a block statement, the scope created by it is assigned to statements inside it, but not to the BlockStmt itself.
+    scope: ScopeId,
+}
+
+impl NodeData {
+    pub fn new(scope: ScopeId, loc: SourceRange, stx: Syntax) -> NodeData {
+        NodeData {
+            loc,
+            stx,
+            scope: scope.clone(),
+        }
+    }
+
+    pub fn error(&self, typ: SyntaxErrorType) -> SyntaxError {
+        SyntaxError::from_loc(self.loc(), typ)
+    }
+
+    pub fn loc(&self) -> &SourceRange {
+        &self.loc
+    }
+
+    pub fn stx(&self) -> &Syntax {
+        &self.stx
+    }
+
+    pub fn stx_mut(&mut self) -> &mut Syntax {
+        &mut self.stx
+    }
+
+    pub fn stx_take(self) -> Syntax {
+        self.stx
+    }
+
+    pub fn scope(&self) -> ScopeId {
+        self.scope
+    }
+}
+
+impl PartialEq for NodeData {
+    fn eq(&self, other: &Self) -> bool {
+        self.stx() == other.stx()
+    }
+}
+
+impl Eq for NodeData {}
+
+impl Debug for NodeData {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("{:?}", self.stx))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NodeId(usize);
+
+impl NodeId {
+    pub fn new(id: usize) -> NodeId {
+        NodeId(id)
+    }
+
+    pub fn id(&self) -> usize {
+        self.0
+    }
+}
+
+pub struct NodeMap {
+    nodes: Vec<NodeData>,
+}
+
+impl NodeMap {
+    pub fn new() -> NodeMap {
+        NodeMap { nodes: Vec::new() }
+    }
+
+    pub fn create_node(&mut self, scope: ScopeId, loc: SourceRange, stx: Syntax) -> NodeId {
+        let id = self.nodes.len();
+        self.nodes.push(NodeData::new(scope, loc, stx));
+        NodeId::new(id)
+    }
+
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    pub fn push(&mut self, n: NodeData) -> () {
+        self.nodes.push(n);
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &NodeData> {
+        self.nodes.iter()
+    }
+}
+
+impl Index<NodeId> for NodeMap {
+    type Output = NodeData;
+
+    fn index(&self, index: NodeId) -> &Self::Output {
+        &self.nodes[index.0]
+    }
+}
+
+impl IndexMut<NodeId> for NodeMap {
+    fn index_mut(&mut self, index: NodeId) -> &mut Self::Output {
+        &mut self.nodes[index.0]
+    }
+}
 
 // These are for readability only, and do not increase type safety or define different structures.
-type Declaration = Node;
-type Expression = Node;
-type Pattern = Node;
-type Signature = Node;
-type Statement = Node;
+type Declaration = NodeId;
+type Expression = NodeId;
+type Pattern = NodeId;
+type Statement = NodeId;
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq, Debug, Serialize)]
 pub enum VarDeclMode {
     Const,
     Let,
@@ -27,7 +140,7 @@ pub enum ArrayElement {
     Empty,
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub enum ClassOrObjectMemberKey {
     Direct(SourceRange),
     Computed(Expression),
@@ -39,7 +152,7 @@ pub enum ClassOrObjectMemberValue {
         body: Statement,
     },
     Method {
-        signature: Signature,
+        signature: NodeId,
         body: Statement,
     },
     Property {
@@ -48,7 +161,7 @@ pub enum ClassOrObjectMemberValue {
     },
     Setter {
         body: Statement,
-        parameter: SourceRange,
+        parameter: Pattern,
     },
 }
 
@@ -60,26 +173,22 @@ pub struct ClassMember {
 }
 
 #[derive(Eq, PartialEq, Debug)]
-pub enum ObjectMember {
-    Single {
+pub enum ObjectMemberType {
+    Valued {
         key: ClassOrObjectMemberKey,
         value: ClassOrObjectMemberValue,
     },
-    SingleShorthand(SourceRange),
-    Rest(Expression),
+    Shorthand {
+        name: SourceRange,
+    },
+    Rest {
+        value: Expression,
+    },
 }
 
 #[derive(Eq, PartialEq, Debug)]
 pub struct ArrayPatternElement {
     pub target: Pattern,
-    pub default_value: Option<Expression>,
-}
-
-#[derive(Eq, PartialEq, Debug)]
-pub struct ObjectPatternProperty {
-    pub key: ClassOrObjectMemberKey,
-    // Omitted if shorthand i.e. key is Direct and target is IdentifierPattern of same name.
-    pub target: Option<Pattern>,
     pub default_value: Option<Expression>,
 }
 
@@ -125,19 +234,6 @@ pub enum ForInOfStmtHeaderLhs {
 }
 
 #[derive(Eq, PartialEq, Debug)]
-pub struct SwitchBranch {
-    // If None, it's `default`.
-    pub case: Option<Expression>,
-    pub body: Vec<Statement>,
-}
-
-#[derive(Eq, PartialEq, Debug)]
-pub struct TryCatch {
-    pub parameter: Option<SourceRange>,
-    pub body: Statement,
-}
-
-#[derive(Eq, PartialEq, Debug)]
 pub enum ForStmtHeader {
     Three {
         init: ForThreeInit,
@@ -166,8 +262,14 @@ pub enum Syntax {
     // For an object pattern, `...` must be followed by an identifier.
     // `const fn = ({ a: { b = c } = d, ...e }: any) => void 0` is possible.
     ObjectPattern {
-        properties: Vec<ObjectPatternProperty>,
-        rest: Option<SourceRange>,
+        // List of ObjectPatternProperty nodes.
+        properties: Vec<NodeId>,
+        // This must be IdentifierPattern, anything else is illegal.
+        rest: Option<Pattern>,
+    },
+    // Not really a pattern but functions similarly; separated out for easy replacement when minifying.
+    FunctionName {
+        name: SourceRange,
     },
 
     // Signatures.
@@ -182,8 +284,8 @@ pub enum Syntax {
         members: Vec<ClassMember>,
     },
     FunctionDecl {
-        name: SourceRange,
-        signature: Signature,
+        name: NodeId,
+        signature: NodeId,
         body: Statement,
     },
     ParamDecl {
@@ -198,8 +300,8 @@ pub enum Syntax {
 
     // Expressions.
     ArrowFunctionExpr {
-        signature: Signature,
-        body: Node,
+        signature: NodeId,
+        body: NodeId,
     },
     BinaryExpr {
         parenthesised: bool,
@@ -224,8 +326,8 @@ pub enum Syntax {
     },
     FunctionExpr {
         parenthesised: bool,
-        name: Option<SourceRange>,
-        signature: Signature,
+        name: Option<NodeId>,
+        signature: NodeId,
         body: Statement,
     },
     IdentifierExpr {
@@ -246,13 +348,21 @@ pub enum Syntax {
         value: JsNumber,
     },
     LiteralObjectExpr {
-        members: Vec<ObjectMember>,
+        // List of ObjectMember nodes.
+        members: Vec<NodeId>,
     },
     LiteralRegexExpr {},
     LiteralStringExpr {
         value: String,
     },
     LiteralUndefined {},
+    // Dedicated special type to easily distinguish when analysing and minifying. Also done to avoid using IdentifierExpr as right, which is incorrect (not a variable usage).
+    MemberAccessExpr {
+        parenthesised: bool,
+        optional_chaining: bool,
+        left: Expression,
+        right: SourceRange,
+    },
     ThisExpr {},
     UnaryExpr {
         parenthesised: bool,
@@ -317,7 +427,7 @@ pub enum Syntax {
     },
     SwitchStmt {
         test: Expression,
-        branches: Vec<SwitchBranch>,
+        branches: Vec<NodeId>,
     },
     ThrowStmt {
         value: Expression,
@@ -325,7 +435,7 @@ pub enum Syntax {
     TryStmt {
         wrapped: Statement,
         // One of these must be present.
-        catch: Option<TryCatch>,
+        catch: Option<NodeId>,
         finally: Option<Statement>,
     },
     VarStmt {
@@ -336,60 +446,27 @@ pub enum Syntax {
         body: Statement,
     },
 
-    // Top level.
+    // Others.
     TopLevel {
         body: Vec<Statement>,
     },
-}
-
-#[derive(Debug)]
-struct NodeData {
-    loc: SourceRange,
-    stx: Syntax,
-}
-
-pub struct Node {
-    data: Box<NodeData>,
-}
-
-impl Node {
-    pub fn new(loc: SourceRange, stx: Syntax) -> Node {
-        Node {
-            data: Box::new(NodeData { loc, stx }),
-        }
-    }
-
-    pub fn error(&self, typ: SyntaxErrorType) -> SyntaxError {
-        SyntaxError::from_loc(self.loc(), typ)
-    }
-
-    pub fn loc(&self) -> &SourceRange {
-        &self.data.loc
-    }
-
-    pub fn stx(&self) -> &Syntax {
-        &self.data.stx
-    }
-
-    pub fn stx_mut(&mut self) -> &mut Syntax {
-        &mut self.data.stx
-    }
-
-    pub fn stx_take(self) -> Syntax {
-        self.data.stx
-    }
-}
-
-impl PartialEq for Node {
-    fn eq(&self, other: &Self) -> bool {
-        self.stx() == other.stx()
-    }
-}
-
-impl Eq for Node {}
-
-impl Debug for Node {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{:?}", self.data.stx))
-    }
+    CatchBlock {
+        parameter: Option<Pattern>,
+        body: Statement,
+    },
+    // This is a node instead of an enum so that we can replace it when minifying e.g. expanding shorthand to `key: value`.
+    ObjectMember {
+        typ: ObjectMemberType,
+    },
+    ObjectPatternProperty {
+        key: ClassOrObjectMemberKey,
+        // Omitted if shorthand i.e. key is Direct and target is IdentifierPattern of same name.
+        target: Option<Pattern>,
+        default_value: Option<Expression>,
+    },
+    SwitchBranch {
+        // If None, it's `default`.
+        case: Option<Expression>,
+        body: Vec<Statement>,
+    },
 }

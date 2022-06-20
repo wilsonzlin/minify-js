@@ -14,6 +14,7 @@ Currently usable, but under development, with the goal to be similar in effectiv
 ## Features
 
 - Fast parsing powered by SIMD instructions and lookup tables.
+- Minification of variable, parameter, and function names.
 
 ## Usage
 
@@ -46,7 +47,18 @@ assert_eq!(out.get_ref().as_slice(), b"let x=1;");
 - Parse and erase TypeScript syntax.
 - FFI libraries for other languages.
 - Aliasing of reused well-knowns.
-- Removal of unreachable code.
-- Unwrap string literal computed members.
-- Aliasing frequently accessed members and methods.
+- Removal of unreachable and redundant code.
+- Aliasing frequently accessed properties and called methods.
 - Better support for non-ASCII syntax.
+- Replacing if statements with conditional and logical expressions.
+- Aliasing repeated identical literal values.
+- Unwrapping blocks.
+- Micro-optimisations:
+  - Unwrap string literal computed members, then identifier or number string members.
+  - Replace `x === null || x === undefined` with `x == null`, where `x` is side-effect free.
+  - Using shorthand properties and Object.assign.
+  - (Dangerous) Replace functions without use of `this` with arrow functions.
+  - Replace `void x` with `undefined`, where `x` is side-effect free.
+  - Replace `return undefined` with `return`.
+  - Replace `const` with `let`.
+  - Hoist `let` and `const`.

@@ -1,6 +1,10 @@
+use std::ops::{Index, IndexMut};
+
+use crate::ast::{NodeData, NodeId, NodeMap, Syntax};
 use crate::error::{SyntaxError, SyntaxErrorType, TsResult};
 use crate::lex::{lex_next, LexMode, Lexer, LexerCheckpoint};
 use crate::source::SourceRange;
+use crate::symbol::{ScopeData, ScopeId, ScopeMap, ScopeType};
 use crate::token::{Token, TokenType};
 
 #[derive(Debug)]
@@ -57,6 +61,22 @@ struct BufferedToken {
 pub struct Parser {
     lexer: Lexer,
     buffered: Option<BufferedToken>,
+    node_map: NodeMap,
+    /*
+      We need at least two separate passes; consider:
+
+      ```js
+      let a = 1;
+      {
+        let fn = () => a;
+        let a = 2;
+        fn();
+      }
+      ```
+
+      This is why we can't just minify in the same one pass. Therefore, to save time, we also analyse scope declarations while parsing.
+    */
+    scope_map: ScopeMap,
 }
 
 impl Parser {
@@ -64,7 +84,33 @@ impl Parser {
         Parser {
             lexer,
             buffered: None,
+            node_map: NodeMap::new(),
+            scope_map: ScopeMap::new(),
         }
+    }
+
+    pub fn create_node(&mut self, scope: ScopeId, loc: SourceRange, stx: Syntax) -> NodeId {
+        self.node_map.create_node(scope, loc, stx)
+    }
+
+    pub fn scope_map_mut(&mut self) -> &mut ScopeMap {
+        &mut self.scope_map
+    }
+
+    pub fn create_global_scope(&mut self) -> ScopeId {
+        self.scope_map.create_scope(None, None, ScopeType::Global)
+    }
+
+    pub fn create_child_scope(&mut self, parent: ScopeId, typ: ScopeType) -> ScopeId {
+        self.scope_map.create_scope(
+            self.scope_map[parent].self_or_ancestor_closure(),
+            Some(parent),
+            typ,
+        )
+    }
+
+    pub fn take(self) -> (NodeMap, ScopeMap) {
+        (self.node_map, self.scope_map)
     }
 
     pub fn source_range(&self) -> SourceRange {
@@ -171,5 +217,33 @@ impl Parser {
 
     pub fn require(&mut self, typ: TokenType) -> TsResult<Token> {
         self.require_with_mode(typ, LexMode::Standard)
+    }
+}
+
+impl Index<NodeId> for Parser {
+    type Output = NodeData;
+
+    fn index(&self, index: NodeId) -> &Self::Output {
+        &self.node_map[index]
+    }
+}
+
+impl IndexMut<NodeId> for Parser {
+    fn index_mut(&mut self, index: NodeId) -> &mut Self::Output {
+        &mut self.node_map[index]
+    }
+}
+
+impl Index<ScopeId> for Parser {
+    type Output = ScopeData;
+
+    fn index(&self, index: ScopeId) -> &Self::Output {
+        &self.scope_map[index]
+    }
+}
+
+impl IndexMut<ScopeId> for Parser {
+    fn index_mut(&mut self, index: ScopeId) -> &mut Self::Output {
+        &mut self.scope_map[index]
     }
 }

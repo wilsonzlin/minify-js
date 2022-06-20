@@ -5,19 +5,20 @@ use crate::token::TokenType;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum SyntaxErrorType {
+    DuplicateVarDecl,
     ExpectedNotFound,
     ExpectedSyntax(&'static str),
+    ForLoopHeaderHasInvalidLhs,
     ForLoopHeaderHasMultipleDeclarators,
     ForLoopHeaderHasNoLhs,
-    ForLoopHeaderHasInvalidLhs,
     LineTerminatorAfterArrowFunctionParameters,
     LineTerminatorAfterThrow,
     LineTerminatorAfterYield,
     LineTerminatorInRegex,
     LineTerminatorInString,
-    TryStatementHasNoCatchOrFinally,
     MalformedLiteralNumber,
     RequiredTokenNotFound(TokenType),
+    TryStatementHasNoCatchOrFinally,
     UnexpectedEnd,
 }
 

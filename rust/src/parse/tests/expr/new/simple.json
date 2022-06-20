@@ -1,0 +1,19 @@
+{
+  "$t": "UnaryExpr",
+  "parenthesised": false,
+  "operator": "UnaryPlus",
+  "argument": {
+    "$t": "UnaryExpr",
+    "parenthesised": false,
+    "operator": "New",
+    "argument": {
+      "$t": "CallExpr",
+      "parenthesised": false,
+      "callee": {
+        "$t": "IdentifierExpr",
+        "name": "abc"
+      },
+      "arguments": []
+    }
+  }
+}

@@ -1,6 +1,6 @@
 use crate::ast::{
     ArrayElement, ClassOrObjectMemberKey, ClassOrObjectMemberValue, ForInOfStmtHeaderLhs,
-    ForStmtHeader, ForThreeInit, Node, ObjectMember, Syntax, VarDeclMode,
+    ForStmtHeader, ForThreeInit, NodeId, NodeMap, ObjectMemberType, Syntax, VarDeclMode,
 };
 use crate::operator::{OperatorName, OPERATORS};
 use lazy_static::lazy_static;
@@ -53,7 +53,9 @@ lazy_static! {
       map.insert(OperatorName::MemberAccess, ".");
       map.insert(OperatorName::Multiplication, "*");
       map.insert(OperatorName::NullishCoalescing, "??");
-      map.insert(OperatorName::OptionalChaining, "?.");
+      map.insert(OperatorName::OptionalChainingMemberAccess, "?.");
+      map.insert(OperatorName::OptionalChainingComputedMemberAccess, "?.[");
+      map.insert(OperatorName::OptionalChainingCall, "?.(");
       map.insert(OperatorName::Remainder, "%");
       map.insert(OperatorName::StrictEquality, "===");
       map.insert(OperatorName::StrictInequality, "!==");
@@ -83,6 +85,7 @@ lazy_static! {
 // Returns whether or not the value is a property.
 fn emit_class_or_object_member<T: Write>(
     out: &mut T,
+    map: &NodeMap,
     key: &ClassOrObjectMemberKey,
     value: &ClassOrObjectMemberValue,
 ) -> io::Result<bool> {
@@ -111,32 +114,32 @@ fn emit_class_or_object_member<T: Write>(
         }
         ClassOrObjectMemberKey::Computed(expr) => {
             out.write_all(b"[")?;
-            emit_js(out, expr)?;
+            emit_js(out, map, *expr)?;
             out.write_all(b"]")?;
         }
     };
     match value {
         ClassOrObjectMemberValue::Getter { body } => {
             out.write_all(b"()")?;
-            emit_js(out, body)?;
+            emit_js(out, map, *body)?;
         }
         ClassOrObjectMemberValue::Method { signature, body } => {
             out.write_all(b"(")?;
-            emit_js(out, signature)?;
+            emit_js(out, map, *signature)?;
             out.write_all(b")")?;
-            emit_js(out, body)?;
+            emit_js(out, map, *body)?;
         }
         ClassOrObjectMemberValue::Property { initializer } => {
             if let Some(v) = initializer {
                 out.write_all(b":")?;
-                emit_js(out, v)?;
+                emit_js(out, map, *v)?;
             };
         }
         ClassOrObjectMemberValue::Setter { body, parameter } => {
             out.write_all(b"(")?;
-            out.write_all(parameter.as_slice())?;
+            emit_js(out, map, *parameter)?;
             out.write_all(b")")?;
-            emit_js(out, body)?;
+            emit_js(out, map, *body)?;
         }
     };
 
@@ -146,23 +149,24 @@ fn emit_class_or_object_member<T: Write>(
     })
 }
 
-pub fn emit_js<T: Write>(out: &mut T, node: &Node) -> io::Result<()> {
-    emit_js_under_operator(out, node, None)?;
+pub fn emit_js<T: Write>(out: &mut T, m: &NodeMap, n: NodeId) -> io::Result<()> {
+    emit_js_under_operator(out, m, n, None)?;
     out.flush()
 }
 
 fn emit_js_under_operator<T: Write>(
     out: &mut T,
-    node: &Node,
+    map: &NodeMap,
+    node_id: NodeId,
     parent_operator_precedence: Option<u8>,
 ) -> io::Result<()> {
-    match node.stx() {
+    match map[node_id].stx() {
         Syntax::EmptyStmt {} => {}
         Syntax::LiteralBooleanExpr { .. }
         | Syntax::LiteralNumberExpr { .. }
         | Syntax::LiteralRegexExpr { .. }
         | Syntax::LiteralStringExpr { .. } => {
-            out.write_all(node.loc().as_slice())?;
+            out.write_all(map[node_id].loc().as_slice())?;
         }
         Syntax::VarDecl { mode, declarators } => {
             out.write_all(match mode {
@@ -175,15 +179,15 @@ fn emit_js_under_operator<T: Write>(
                 if i > 0 {
                     out.write_all(b",")?;
                 }
-                emit_js(out, &decl.pattern)?;
+                emit_js(out, map, decl.pattern)?;
                 if let Some(expr) = &decl.initializer {
                     out.write_all(b"=")?;
-                    emit_js(out, expr)?;
+                    emit_js(out, map, *expr)?;
                 };
             }
         }
         Syntax::VarStmt { declaration } => {
-            emit_js(out, declaration)?;
+            emit_js(out, map, *declaration)?;
             // TODO Omit semicolon if possible.
             out.write_all(b";")?;
         }
@@ -197,10 +201,10 @@ fn emit_js_under_operator<T: Write>(
                     out.write_all(b",")?;
                 }
                 if let Some(e) = e {
-                    emit_js(out, &e.target)?;
+                    emit_js(out, map, e.target)?;
                     if let Some(v) = &e.default_value {
                         out.write_all(b"=")?;
-                        emit_js(out, v)?;
+                        emit_js(out, map, *v)?;
                     }
                 };
             }
@@ -209,7 +213,7 @@ fn emit_js_under_operator<T: Write>(
                     out.write_all(b",")?;
                 }
                 out.write_all(b"...")?;
-                emit_js(out, r)?;
+                emit_js(out, map, *r)?;
             };
             out.write_all(b"]")?;
         }
@@ -219,40 +223,26 @@ fn emit_js_under_operator<T: Write>(
                 if i > 0 {
                     out.write_all(b",")?;
                 }
-                match &e.key {
-                    ClassOrObjectMemberKey::Direct(name) => {
-                        out.write_all(name.as_slice())?;
-                    }
-                    ClassOrObjectMemberKey::Computed(expr) => {
-                        out.write_all(b"[")?;
-                        emit_js(out, expr)?;
-                        out.write_all(b"]")?;
-                    }
-                };
-                if let Some(t) = &e.target {
-                    out.write_all(b":")?;
-                    emit_js(out, t)?;
-                };
-                if let Some(v) = &e.default_value {
-                    out.write_all(b"=")?;
-                    emit_js(out, v)?;
-                };
+                emit_js(out, map, *e)?;
             }
             if let Some(r) = rest {
                 if !properties.is_empty() {
                     out.write_all(b",")?;
                 }
                 out.write_all(b"...")?;
-                out.write_all(r.as_slice())?;
+                emit_js(out, map, *r)?;
             };
             out.write_all(b"}")?;
+        }
+        Syntax::FunctionName { name } => {
+            out.write_all(name.as_slice())?;
         }
         Syntax::FunctionSignature { parameters } => {
             for (i, p) in parameters.iter().enumerate() {
                 if i > 0 {
                     out.write_all(b",")?;
                 };
-                emit_js(out, p)?;
+                emit_js(out, map, *p)?;
             }
         }
         Syntax::ClassDecl {
@@ -278,7 +268,7 @@ fn emit_js_under_operator<T: Write>(
                 if m.statik {
                     out.write_all(b"static ")?;
                 }
-                last_member_was_property = emit_class_or_object_member(out, &m.key, &m.value)?;
+                last_member_was_property = emit_class_or_object_member(out, map, &m.key, &m.value)?;
             }
             out.write_all(b"}")?;
         }
@@ -288,11 +278,11 @@ fn emit_js_under_operator<T: Write>(
             body,
         } => {
             out.write_all(b"function ")?;
-            out.write_all(name.as_slice())?;
+            emit_js(out, map, *name)?;
             out.write_all(b"(")?;
-            emit_js(out, signature)?;
+            emit_js(out, map, *signature)?;
             out.write_all(b")")?;
-            emit_js(out, body)?;
+            emit_js(out, map, *body)?;
         }
         Syntax::ParamDecl {
             rest,
@@ -302,17 +292,17 @@ fn emit_js_under_operator<T: Write>(
             if *rest {
                 out.write_all(b"...")?;
             };
-            emit_js(out, pattern)?;
+            emit_js(out, map, *pattern)?;
             if let Some(v) = default_value {
                 out.write_all(b"=")?;
-                emit_js(out, v)?;
+                emit_js(out, map, *v)?;
             }
         }
         Syntax::ArrowFunctionExpr { signature, body } => {
             let can_omit_parentheses =
-                if let Syntax::FunctionSignature { parameters } = signature.stx() {
+                if let Syntax::FunctionSignature { parameters } = map[*signature].stx() {
                     parameters.len() == 1
-                        && match parameters[0].stx() {
+                        && match map[parameters[0]].stx() {
                             Syntax::ParamDecl {
                                 default_value,
                                 pattern,
@@ -320,7 +310,7 @@ fn emit_js_under_operator<T: Write>(
                             } => {
                                 !rest
                                     && default_value.is_none()
-                                    && match pattern.stx() {
+                                    && match map[*pattern].stx() {
                                         Syntax::IdentifierPattern { .. } => true,
                                         _ => false,
                                     }
@@ -333,12 +323,12 @@ fn emit_js_under_operator<T: Write>(
             if !can_omit_parentheses {
                 out.write_all(b"(")?;
             };
-            emit_js(out, signature)?;
+            emit_js(out, map, *signature)?;
             if !can_omit_parentheses {
                 out.write_all(b")")?;
             };
             out.write_all(b"=>")?;
-            emit_js(out, body)?;
+            emit_js(out, map, *body)?;
         }
         Syntax::BinaryExpr {
             parenthesised,
@@ -355,14 +345,14 @@ fn emit_js_under_operator<T: Write>(
             if must_parenthesise {
                 out.write_all(b"(")?;
             };
-            emit_js_under_operator(out, left, Some(operator.precedence))?;
+            emit_js_under_operator(out, map, *left, Some(operator.precedence))?;
             out.write_all(
                 BINARY_OPERATOR_SYNTAX
                     .get(operator_name)
                     .unwrap()
                     .as_bytes(),
             )?;
-            emit_js_under_operator(out, right, Some(operator.precedence))?;
+            emit_js_under_operator(out, map, *right, Some(operator.precedence))?;
             if must_parenthesise {
                 out.write_all(b")")?;
             };
@@ -377,13 +367,13 @@ fn emit_js_under_operator<T: Write>(
             if *parenthesised {
                 out.write_all(b"(")?;
             }
-            emit_js(out, callee)?;
+            emit_js(out, map, *callee)?;
             out.write_all(b"(")?;
             for (i, a) in arguments.iter().enumerate() {
                 if i > 0 {
                     out.write_all(b",")?;
                 }
-                emit_js(out, a)?;
+                emit_js(out, map, *a)?;
             }
             out.write_all(b")")?;
             // TODO Omit parentheses if possible.
@@ -406,11 +396,11 @@ fn emit_js_under_operator<T: Write>(
             if must_parenthesise {
                 out.write_all(b"(")?;
             };
-            emit_js(out, test)?;
+            emit_js(out, map, *test)?;
             out.write_all(b"?")?;
-            emit_js(out, consequent)?;
+            emit_js(out, map, *consequent)?;
             out.write_all(b":")?;
-            emit_js(out, alternate)?;
+            emit_js(out, map, *alternate)?;
             if must_parenthesise {
                 out.write_all(b")")?;
             };
@@ -429,12 +419,12 @@ fn emit_js_under_operator<T: Write>(
             out.write_all(b"function")?;
             if let Some(name) = name {
                 out.write_all(b" ")?;
-                out.write_all(name.as_slice())?;
+                emit_js(out, map, *name);
             };
             out.write_all(b"(")?;
-            emit_js(out, signature)?;
+            emit_js(out, map, *signature)?;
             out.write_all(b")")?;
-            emit_js(out, body)?;
+            emit_js(out, map, *body)?;
             // TODO Omit parentheses if possible.
             if *parenthesised {
                 out.write_all(b")")?;
@@ -452,11 +442,11 @@ fn emit_js_under_operator<T: Write>(
                 };
                 match e {
                     ArrayElement::Single(expr) => {
-                        emit_js(out, expr)?;
+                        emit_js(out, map, *expr)?;
                     }
                     ArrayElement::Rest(expr) => {
                         out.write_all(b"...")?;
-                        emit_js(out, expr)?;
+                        emit_js(out, map, *expr)?;
                     }
                     ArrayElement::Empty => {}
                 };
@@ -469,18 +459,7 @@ fn emit_js_under_operator<T: Write>(
                 if i > 0 {
                     out.write_all(b",")?;
                 }
-                match e {
-                    ObjectMember::Single { key, value } => {
-                        emit_class_or_object_member(out, key, value)?;
-                    }
-                    ObjectMember::SingleShorthand(name) => {
-                        out.write_all(name.as_slice())?;
-                    }
-                    ObjectMember::Rest(expr) => {
-                        out.write_all(b"...")?;
-                        emit_js(out, expr)?;
-                    }
-                }
+                emit_js(out, map, *e)?;
             }
             out.write_all(b"}")?;
         }
@@ -505,7 +484,7 @@ fn emit_js_under_operator<T: Write>(
                 out.write_all(b"(")?;
             };
             out.write_all(UNARY_OPERATOR_SYNTAX.get(operator_name).unwrap().as_bytes())?;
-            emit_js_under_operator(out, argument, Some(operator.precedence))?;
+            emit_js_under_operator(out, map, *argument, Some(operator.precedence))?;
             if must_parenthesise {
                 out.write_all(b")")?;
             };
@@ -524,7 +503,7 @@ fn emit_js_under_operator<T: Write>(
             if must_parenthesise {
                 out.write_all(b"(")?;
             };
-            emit_js_under_operator(out, argument, Some(operator.precedence))?;
+            emit_js_under_operator(out, map, *argument, Some(operator.precedence))?;
             out.write_all(match operator_name {
                 OperatorName::PostfixDecrement => b"--",
                 OperatorName::PostfixIncrement => b"++",
@@ -540,12 +519,12 @@ fn emit_js_under_operator<T: Write>(
                 out.write_all(b"*")?;
             }
             out.write_all(b" ")?;
-            emit_js(out, argument)?;
+            emit_js(out, map, *argument)?;
         }
         Syntax::BlockStmt { body } => {
             out.write_all(b"{")?;
             for n in body {
-                emit_js(out, n)?;
+                emit_js(out, map, *n)?;
             }
             out.write_all(b"}")?;
         }
@@ -564,18 +543,19 @@ fn emit_js_under_operator<T: Write>(
         Syntax::ComputedMemberExpr { object, member } => {
             emit_js_under_operator(
                 out,
-                object,
+                map,
+                *object,
                 Some(OPERATORS[&OperatorName::ComputedMemberAccess].precedence),
             )?;
             out.write_all(b"[")?;
-            emit_js(out, member)?;
+            emit_js(out, map, *member)?;
             out.write_all(b"]")?;
         }
         Syntax::ExportDeclStmt { declaration } => todo!(),
         Syntax::ExportDefaultStmt { expression } => todo!(),
         Syntax::ExportListStmt { names, from } => todo!(),
         Syntax::ExpressionStmt { expression } => {
-            emit_js(out, expression)?;
+            emit_js(out, map, *expression)?;
             // TODO Omit semicolon if possible.
             out.write_all(b";")?;
         }
@@ -585,13 +565,13 @@ fn emit_js_under_operator<T: Write>(
             alternate,
         } => {
             out.write_all(b"if(")?;
-            emit_js(out, test)?;
+            emit_js(out, map, *test)?;
             out.write_all(b")")?;
-            emit_js(out, consequent)?;
+            emit_js(out, map, *consequent)?;
             if let Some(alternate) = alternate {
                 // TODO Trailing space not always necessary.
                 out.write_all(b"else ")?;
-                emit_js(out, alternate)?;
+                emit_js(out, map, *alternate)?;
             };
         }
         Syntax::ForStmt { header, body } => {
@@ -605,22 +585,22 @@ fn emit_js_under_operator<T: Write>(
                     match init {
                         ForThreeInit::None => {}
                         ForThreeInit::Expression(n) | ForThreeInit::Declaration(n) => {
-                            emit_js(out, n)?
+                            emit_js(out, map, *n)?
                         }
                     };
                     out.write_all(b";")?;
                     if let Some(n) = condition {
-                        emit_js(out, n)?
+                        emit_js(out, map, *n)?
                     }
                     out.write_all(b";")?;
                     if let Some(n) = post {
-                        emit_js(out, n)?
+                        emit_js(out, map, *n)?
                     }
                 }
                 ForStmtHeader::InOf { of, lhs, rhs } => {
                     match lhs {
                         ForInOfStmtHeaderLhs::Declaration(n) | ForInOfStmtHeaderLhs::Pattern(n) => {
-                            emit_js(out, n)?
+                            emit_js(out, map, *n)?
                         }
                     };
                     if *of {
@@ -628,11 +608,11 @@ fn emit_js_under_operator<T: Write>(
                     } else {
                         out.write_all(b" in ")?;
                     }
-                    emit_js(out, rhs)?;
+                    emit_js(out, map, *rhs)?;
                 }
             };
             out.write_all(b")")?;
-            emit_js(out, body)?;
+            emit_js(out, map, *body)?;
         }
         Syntax::ImportStmt {
             default,
@@ -643,7 +623,7 @@ fn emit_js_under_operator<T: Write>(
             // TODO Omit space if possible.
             out.write_all(b"return ")?;
             if let Some(value) = value {
-                emit_js(out, value)?;
+                emit_js(out, map, *value)?;
             };
             // TODO Omit semicolon if possible.
             out.write_all(b";")?;
@@ -653,13 +633,13 @@ fn emit_js_under_operator<T: Write>(
         }
         Syntax::ThrowStmt { value } => {
             out.write_all(b"throw ")?;
-            emit_js(out, value)?;
+            emit_js(out, map, *value)?;
             // TODO Omit semicolon if possible.
             out.write_all(b";")?;
         }
         Syntax::TopLevel { body } => {
             for n in body {
-                emit_js(out, n)?;
+                emit_js(out, map, *n)?;
             }
         }
         Syntax::TryStmt {
@@ -668,56 +648,132 @@ fn emit_js_under_operator<T: Write>(
             finally,
         } => {
             out.write_all(b"try")?;
-            emit_js(out, wrapped)?;
+            emit_js(out, map, *wrapped)?;
             if let Some(c) = catch {
-                out.write_all(b"catch")?;
-                if let Some(p) = &c.parameter {
-                    out.write_all(b"(")?;
-                    out.write_all(p.as_slice())?;
-                    out.write_all(b")")?;
-                }
-                emit_js(out, &c.body)?;
+                emit_js(out, map, *c)?;
             }
             if let Some(f) = finally {
                 out.write_all(b"finally")?;
-                emit_js(out, f)?;
+                emit_js(out, map, *f)?;
             };
         }
         Syntax::WhileStmt { condition, body } => {
             out.write_all(b"while(")?;
-            emit_js(out, condition)?;
+            emit_js(out, map, *condition)?;
             out.write_all(b")")?;
-            emit_js(out, body)?;
+            emit_js(out, map, *body)?;
         }
         Syntax::DoWhileStmt { condition, body } => {
             // TODO Omit space if possible.
             out.write_all(b"do ")?;
-            emit_js(out, body)?;
+            emit_js(out, map, *body)?;
             out.write_all(b"while(")?;
-            emit_js(out, condition)?;
+            emit_js(out, map, *condition)?;
             out.write_all(b")")?;
         }
         Syntax::SwitchStmt { test, branches } => {
             out.write_all(b"switch(")?;
-            emit_js(out, test)?;
+            emit_js(out, map, *test)?;
             out.write_all(b"){")?;
             for b in branches {
-                match &b.case {
-                    Some(case) => {
-                        // TODO Omit space if possible.
-                        out.write_all(b"case ")?;
-                        emit_js(out, &case)?;
-                        out.write_all(b":")?;
-                    }
-                    None => {
-                        out.write_all(b"default:")?;
-                    }
-                }
-                for stmt in b.body.iter() {
-                    emit_js(out, stmt)?;
-                }
+                emit_js(out, map, *b)?;
             }
             out.write_all(b"}")?;
+        }
+        Syntax::CatchBlock { parameter, body } => {
+            out.write_all(b"catch")?;
+            if let Some(p) = parameter {
+                out.write_all(b"(")?;
+                emit_js(out, map, *p)?;
+                out.write_all(b")")?;
+            }
+            emit_js(out, map, *body)?;
+        }
+        Syntax::SwitchBranch { case, body } => {
+            match case {
+                Some(case) => {
+                    // TODO Omit space if possible.
+                    out.write_all(b"case ")?;
+                    emit_js(out, map, *case)?;
+                    out.write_all(b":")?;
+                }
+                None => {
+                    out.write_all(b"default:")?;
+                }
+            }
+            for stmt in body.iter() {
+                emit_js(out, map, *stmt)?;
+            }
+        }
+        Syntax::ObjectPatternProperty {
+            key,
+            target,
+            default_value,
+        } => {
+            match key {
+                ClassOrObjectMemberKey::Direct(name) => {
+                    out.write_all(name.as_slice())?;
+                }
+                ClassOrObjectMemberKey::Computed(expr) => {
+                    out.write_all(b"[")?;
+                    emit_js(out, map, *expr)?;
+                    out.write_all(b"]")?;
+                }
+            };
+            if let Some(t) = target {
+                out.write_all(b":")?;
+                emit_js(out, map, *t)?;
+            };
+            if let Some(v) = default_value {
+                out.write_all(b"=")?;
+                emit_js(out, map, *v)?;
+            };
+        }
+        Syntax::ObjectMember { typ } => {
+            match typ {
+                ObjectMemberType::Valued { key, value } => {
+                    emit_class_or_object_member(out, map, key, value)?;
+                }
+                ObjectMemberType::Shorthand { name } => {
+                    out.write_all(name.as_slice())?;
+                }
+                ObjectMemberType::Rest { value } => {
+                    out.write_all(b"...")?;
+                    emit_js(out, map, *value)?;
+                }
+            };
+        }
+        Syntax::MemberAccessExpr {
+            parenthesised,
+            optional_chaining,
+            left,
+            right,
+        } => {
+            let operator_name = &if *optional_chaining {
+                OperatorName::OptionalChainingMemberAccess
+            } else {
+                OperatorName::MemberAccess
+            };
+            let operator = &OPERATORS[operator_name];
+            let must_parenthesise = match parent_operator_precedence {
+                Some(po) if po > operator.precedence => true,
+                Some(po) if po == operator.precedence => *parenthesised,
+                _ => false,
+            };
+            if must_parenthesise {
+                out.write_all(b"(")?;
+            };
+            emit_js_under_operator(out, map, *left, Some(operator.precedence))?;
+            out.write_all(
+                BINARY_OPERATOR_SYNTAX
+                    .get(operator_name)
+                    .unwrap()
+                    .as_bytes(),
+            )?;
+            out.write_all(right.as_slice())?;
+            if must_parenthesise {
+                out.write_all(b")")?;
+            };
         }
     };
     Ok(())

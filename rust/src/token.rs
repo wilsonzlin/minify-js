@@ -119,6 +119,8 @@ pub enum TokenType {
     PlusPlus,
     Question,
     QuestionDot,
+    QuestionDotBracketOpen,
+    QuestionDotParenthesisOpen,
     QuestionQuestion,
     QuestionQuestionEquals,
     Semicolon,

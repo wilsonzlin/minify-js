@@ -54,10 +54,13 @@ impl CharFilter {
     }
 }
 
-lazy_static! {
-  // WARNING: Does not consider Unicode characters allowed by spec.
-    pub static ref ID_START_CHARSTR: &'static [u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_$";
+// WARNING: Does not consider Unicode characters allowed by spec.
+pub const ID_START_CHARSTR: &'static [u8] =
+    b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_$";
+pub const ID_CONTINUE_CHARSTR: &'static [u8] =
+    b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_$";
 
+lazy_static! {
     pub static ref DIGIT: CharFilter = {
         let mut filter = CharFilter::new();
         filter.add_chars(b'0'..=b'9');

@@ -1,5 +1,6 @@
 use crate::ast::{
-    ArrayElement, ClassOrObjectMemberKey, ClassOrObjectMemberValue, Node, ObjectMember, Syntax,
+    ArrayElement, ClassOrObjectMemberKey, ClassOrObjectMemberValue, NodeId, ObjectMemberType,
+    Syntax,
 };
 use crate::error::{SyntaxErrorType, TsResult};
 use crate::lex::{LexMode, KEYWORDS_MAPPING};
@@ -11,8 +12,10 @@ use crate::parse::operator::{MULTARY_OPERATOR_MAPPING, UNARY_OPERATOR_MAPPING};
 use crate::parse::parser::Parser;
 use crate::parse::signature::parse_signature_function;
 use crate::parse::stmt::parse_stmt;
+use crate::symbol::{ScopeId, ScopeType, Symbol};
 use crate::token::TokenType;
 
+use super::pattern::{parse_pattern, ParsePatternAction};
 use super::stmt::parse_stmt_block;
 
 pub struct Asi {
@@ -36,13 +39,14 @@ impl Asi {
     }
 }
 
-pub fn parse_call_args(parser: &mut Parser) -> TsResult<Vec<Node>> {
-    let mut args = Vec::<Node>::new();
+pub fn parse_call_args(scope: ScopeId, parser: &mut Parser) -> TsResult<Vec<NodeId>> {
+    let mut args = Vec::<NodeId>::new();
     loop {
         if parser.peek()?.typ() == TokenType::ParenthesisClose {
             break;
         };
         args.push(parse_expr_until_either(
+            scope,
             parser,
             TokenType::Comma,
             TokenType::ParenthesisClose,
@@ -54,40 +58,60 @@ pub fn parse_call_args(parser: &mut Parser) -> TsResult<Vec<Node>> {
     Ok(args)
 }
 
-pub fn parse_expr(parser: &mut Parser, terminator: TokenType) -> TsResult<Node> {
+pub fn parse_expr(scope: ScopeId, parser: &mut Parser, terminator: TokenType) -> TsResult<NodeId> {
     let mut asi = Asi::no();
-    parse_expr_with_min_prec(parser, 1, terminator, TokenType::_Dummy, false, &mut asi)
+    parse_expr_with_min_prec(
+        scope,
+        parser,
+        1,
+        terminator,
+        TokenType::_Dummy,
+        false,
+        &mut asi,
+    )
 }
 
 pub fn parse_expr_with_asi(
+    scope: ScopeId,
     parser: &mut Parser,
     terminator: TokenType,
     asi: &mut Asi,
-) -> TsResult<Node> {
-    parse_expr_with_min_prec(parser, 1, terminator, TokenType::_Dummy, false, asi)
+) -> TsResult<NodeId> {
+    parse_expr_with_min_prec(scope, parser, 1, terminator, TokenType::_Dummy, false, asi)
 }
 
 pub fn parse_expr_until_either(
+    scope: ScopeId,
     parser: &mut Parser,
     terminator_a: TokenType,
     terminator_b: TokenType,
-) -> TsResult<Node> {
+) -> TsResult<NodeId> {
     let mut asi = Asi::no();
-    parse_expr_with_min_prec(parser, 1, terminator_a, terminator_b, false, &mut asi)
+    parse_expr_with_min_prec(
+        scope,
+        parser,
+        1,
+        terminator_a,
+        terminator_b,
+        false,
+        &mut asi,
+    )
 }
 
 pub fn parse_expr_until_either_with_asi(
+    scope: ScopeId,
     parser: &mut Parser,
     terminator_a: TokenType,
     terminator_b: TokenType,
     asi: &mut Asi,
-) -> TsResult<Node> {
-    parse_expr_with_min_prec(parser, 1, terminator_a, terminator_b, false, asi)
+) -> TsResult<NodeId> {
+    parse_expr_with_min_prec(scope, parser, 1, terminator_a, terminator_b, false, asi)
 }
 
-pub fn parse_grouping(parser: &mut Parser, asi: &mut Asi) -> TsResult<Node> {
+pub fn parse_grouping(scope: ScopeId, parser: &mut Parser, asi: &mut Asi) -> TsResult<NodeId> {
     parser.require(TokenType::ParenthesisOpen)?;
     let expr = parse_expr_with_min_prec(
+        scope,
         parser,
         1,
         TokenType::ParenthesisClose,
@@ -99,7 +123,7 @@ pub fn parse_grouping(parser: &mut Parser, asi: &mut Asi) -> TsResult<Node> {
     Ok(expr)
 }
 
-pub fn parse_expr_array(parser: &mut Parser) -> TsResult<Node> {
+pub fn parse_expr_array(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId> {
     let loc_start = parser.require(TokenType::BracketOpen)?.loc_take();
     let mut elements = Vec::<ArrayElement>::new();
     loop {
@@ -111,7 +135,8 @@ pub fn parse_expr_array(parser: &mut Parser) -> TsResult<Node> {
             break;
         };
         let rest = parser.consume_if(TokenType::DotDotDot)?.is_match();
-        let value = parse_expr_until_either(parser, TokenType::Comma, TokenType::BracketClose)?;
+        let value =
+            parse_expr_until_either(scope, parser, TokenType::Comma, TokenType::BracketClose)?;
         elements.push(if rest {
             ArrayElement::Rest(value)
         } else {
@@ -123,24 +148,34 @@ pub fn parse_expr_array(parser: &mut Parser) -> TsResult<Node> {
         parser.require(TokenType::Comma)?;
     }
     let loc_end = parser.require(TokenType::BracketClose)?.loc_take();
-    Ok(Node::new(
+    Ok(parser.create_node(
+        scope,
         &loc_start + &loc_end,
         Syntax::LiteralArrayExpr { elements },
     ))
 }
 
-pub fn parse_expr_object(parser: &mut Parser) -> TsResult<Node> {
+pub fn parse_expr_object(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId> {
     let loc_start = parser.require(TokenType::BraceOpen)?.loc_take();
-    let mut members = Vec::<ObjectMember>::new();
+    let mut members = Vec::<NodeId>::new();
     loop {
         if parser.peek()?.typ() == TokenType::BraceClose {
             break;
         };
         let rest = parser.consume_if(TokenType::DotDotDot)?.is_match();
         if rest {
-            let value = parse_expr_until_either(parser, TokenType::Comma, TokenType::BraceClose)?;
-            members.push(ObjectMember::Rest(value));
+            let value =
+                parse_expr_until_either(scope, parser, TokenType::Comma, TokenType::BraceClose)?;
+            let loc = parser[value].loc().clone();
+            members.push(parser.create_node(
+                scope,
+                loc,
+                Syntax::ObjectMember {
+                    typ: ObjectMemberType::Rest { value },
+                },
+            ));
         } else {
+            let loc = parser.peek()?.loc_take();
             let checkpoint = parser.checkpoint();
             let mut is_getter = parser.consume_if(TokenType::KeywordGet)?.is_match();
             let mut is_setter = !is_getter && parser.consume_if(TokenType::KeywordSet)?.is_match();
@@ -151,8 +186,11 @@ pub fn parse_expr_object(parser: &mut Parser) -> TsResult<Node> {
                 is_setter = false;
             }
             let (key, key_is_direct) = if parser.consume_if(TokenType::BracketOpen)?.is_match() {
-                let key =
-                    ClassOrObjectMemberKey::Computed(parse_expr(parser, TokenType::BracketClose)?);
+                let key = ClassOrObjectMemberKey::Computed(parse_expr(
+                    scope,
+                    parser,
+                    TokenType::BracketClose,
+                )?);
                 parser.require(TokenType::BracketClose)?;
                 (key, false)
             } else {
@@ -185,21 +223,23 @@ pub fn parse_expr_object(parser: &mut Parser) -> TsResult<Node> {
                 parser.require(TokenType::ParenthesisOpen)?;
                 parser.require(TokenType::ParenthesisClose)?;
                 Some(ClassOrObjectMemberValue::Getter {
-                    body: parse_stmt_block(parser)?,
+                    body: parse_stmt_block(scope, parser)?,
                 })
             } else if is_setter {
+                let setter_scope = parser.create_child_scope(scope, ScopeType::Closure);
                 parser.require(TokenType::ParenthesisOpen)?;
-                let parameter = parser.require(TokenType::Identifier)?.loc_take();
+                let parameter =
+                    parse_pattern(setter_scope, parser, ParsePatternAction::AddToClosureScope)?;
                 parser.require(TokenType::ParenthesisClose)?;
                 Some(ClassOrObjectMemberValue::Setter {
                     parameter,
-                    body: parse_stmt_block(parser)?,
+                    body: parse_stmt_block(setter_scope, parser)?,
                 })
             } else if parser.peek()?.typ() == TokenType::ParenthesisOpen {
-                let signature = parse_signature_function(parser)?;
+                let signature = parse_signature_function(scope, parser)?;
                 Some(ClassOrObjectMemberValue::Method {
                     signature,
-                    body: parse_stmt_block(parser)?,
+                    body: parse_stmt_block(scope, parser)?,
                 })
             } else if key_is_direct
                 && match parser.peek()?.typ() {
@@ -210,19 +250,32 @@ pub fn parse_expr_object(parser: &mut Parser) -> TsResult<Node> {
                 None
             } else {
                 parser.require(TokenType::Colon)?;
-                let value =
-                    parse_expr_until_either(parser, TokenType::Comma, TokenType::BraceClose)?;
+                let value = parse_expr_until_either(
+                    scope,
+                    parser,
+                    TokenType::Comma,
+                    TokenType::BraceClose,
+                )?;
                 Some(ClassOrObjectMemberValue::Property {
                     initializer: Some(value),
                 })
             };
-            members.push(match value {
-                Some(value) => ObjectMember::Single { key, value },
-                None => ObjectMember::SingleShorthand(match key {
-                    ClassOrObjectMemberKey::Direct(key) => key,
-                    _ => unreachable!(),
-                }),
-            });
+            // TODO loc.
+            members.push(parser.create_node(
+                scope,
+                loc,
+                Syntax::ObjectMember {
+                    typ: match value {
+                        Some(value) => ObjectMemberType::Valued { key, value },
+                        None => ObjectMemberType::Shorthand {
+                            name: match key {
+                                ClassOrObjectMemberKey::Direct(key) => key.clone(),
+                                _ => unreachable!(),
+                            },
+                        },
+                    },
+                },
+            ));
         }
         if parser.peek()?.typ() == TokenType::BraceClose {
             break;
@@ -230,18 +283,20 @@ pub fn parse_expr_object(parser: &mut Parser) -> TsResult<Node> {
         parser.require(TokenType::Comma)?;
     }
     let loc_end = parser.require(TokenType::BraceClose)?.loc_take();
-    Ok(Node::new(
+    Ok(parser.create_node(
+        scope,
         &loc_start + &loc_end,
         Syntax::LiteralObjectExpr { members },
     ))
 }
 
 pub fn parse_expr_arrow_function_or_grouping(
+    scope: ScopeId,
     parser: &mut Parser,
     terminator_a: TokenType,
     terminator_b: TokenType,
     asi: &mut Asi,
-) -> TsResult<Node> {
+) -> TsResult<NodeId> {
     // Try and parse as arrow function signature first.
     // If we fail, backtrack and parse as grouping instead.
     // After we see `=>`, we assume it's definitely an arrow function and do not backtrack.
@@ -254,7 +309,9 @@ pub fn parse_expr_arrow_function_or_grouping(
 
     let cp = parser.checkpoint();
 
-    let signature = match parse_signature_function(parser).and_then(|sig| {
+    let fn_scope = parser.create_child_scope(scope, ScopeType::Closure);
+
+    let signature = match parse_signature_function(fn_scope, parser).and_then(|sig| {
         let arrow = parser.require(TokenType::EqualsChevronRight)?;
         if arrow.preceded_by_line_terminator() {
             // Illegal under Automatic Semicolon Insertion rules.
@@ -268,39 +325,54 @@ pub fn parse_expr_arrow_function_or_grouping(
         }
         Err(_) => {
             parser.restore_checkpoint(cp);
-            return parse_grouping(parser, asi);
+            return parse_grouping(scope, parser, asi);
         }
     };
     let body = match parser.peek()?.typ() {
-        TokenType::BraceOpen => parse_stmt(parser)?,
-        _ => parse_expr_until_either(parser, terminator_a, terminator_b)?,
+        TokenType::BraceOpen => parse_stmt(fn_scope, parser)?,
+        _ => parse_expr_until_either(fn_scope, parser, terminator_a, terminator_b)?,
     };
-    Ok(Node::new(
-        signature.loc() + body.loc(),
+    Ok(parser.create_node(
+        scope,
+        parser[signature].loc() + parser[body].loc(),
         Syntax::ArrowFunctionExpr { signature, body },
     ))
 }
 
-pub fn parse_expr_import(parser: &mut Parser) -> TsResult<Node> {
+pub fn parse_expr_import(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId> {
     let start = parser.require(TokenType::KeywordImport)?;
     parser.require(TokenType::ParenthesisOpen)?;
     // TODO Non-literal-string imports.
     let module = parse_and_normalise_literal_string(parser)?;
     parser.require(TokenType::ParenthesisClose)?;
     let end = parser.require(TokenType::ParenthesisClose)?;
-    Ok(Node::new(
+    Ok(parser.create_node(
+        scope,
         start.loc() + end.loc(),
         Syntax::ImportExpr { module },
     ))
 }
 
-pub fn parse_expr_function(parser: &mut Parser) -> TsResult<Node> {
+pub fn parse_expr_function(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId> {
+    let fn_scope = parser.create_child_scope(scope, ScopeType::Closure);
     let start = parser.require(TokenType::KeywordFunction)?.loc().clone();
-    let name = parser.consume_if(TokenType::Identifier)?.match_loc_take();
-    let signature = parse_signature_function(parser)?;
-    let body = parse_stmt_block(parser)?;
-    Ok(Node::new(
-        &start + body.loc(),
+    let name = match parser.consume_if(TokenType::Identifier)?.match_loc_take() {
+        Some(name) => {
+            let name_node = parser.create_node(
+                fn_scope,
+                name.clone(),
+                Syntax::FunctionName { name: name.clone() },
+            );
+            parser[fn_scope].add_symbol(name.clone(), Symbol::new(name_node))?;
+            Some(name_node)
+        }
+        None => None,
+    };
+    let signature = parse_signature_function(fn_scope, parser)?;
+    let body = parse_stmt_block(fn_scope, parser)?;
+    Ok(parser.create_node(
+        scope,
+        &start + parser[body].loc(),
         Syntax::FunctionExpr {
             parenthesised: false,
             name,
@@ -311,17 +383,19 @@ pub fn parse_expr_function(parser: &mut Parser) -> TsResult<Node> {
 }
 
 fn parse_expr_operand(
+    scope: ScopeId,
     parser: &mut Parser,
     terminator_a: TokenType,
     terminator_b: TokenType,
     asi: &mut Asi,
-) -> TsResult<Node> {
+) -> TsResult<NodeId> {
     let cp = parser.checkpoint();
     let t = parser.next_with_mode(LexMode::SlashIsRegex)?;
     let operand = if let Some(operator) = UNARY_OPERATOR_MAPPING.get(&t.typ()) {
         let next_min_prec =
             operator.precedence + (operator.associativity == Associativity::Left) as u8;
         let operand = parse_expr_with_min_prec(
+            scope,
             parser,
             next_min_prec,
             terminator_a,
@@ -329,8 +403,9 @@ fn parse_expr_operand(
             false,
             asi,
         )?;
-        Node::new(
-            t.loc() + operand.loc(),
+        parser.create_node(
+            scope,
+            t.loc() + parser[operand].loc(),
             Syntax::UnaryExpr {
                 parenthesised: false,
                 operator: operator.name,
@@ -341,13 +416,14 @@ fn parse_expr_operand(
         match t.typ() {
             TokenType::BracketOpen => {
                 parser.restore_checkpoint(cp);
-                parse_expr_array(parser)?
+                parse_expr_array(scope, parser)?
             }
             TokenType::BraceOpen => {
                 parser.restore_checkpoint(cp);
-                parse_expr_object(parser)?
+                parse_expr_object(scope, parser)?
             }
-            TokenType::Identifier => Node::new(
+            TokenType::Identifier => parser.create_node(
+                scope,
                 t.loc().clone(),
                 Syntax::IdentifierExpr {
                     name: t.loc().clone(),
@@ -355,37 +431,54 @@ fn parse_expr_operand(
             ),
             TokenType::KeywordFunction => {
                 parser.restore_checkpoint(cp);
-                parse_expr_function(parser)?
+                parse_expr_function(scope, parser)?
             }
             TokenType::KeywordImport => {
                 parser.restore_checkpoint(cp);
-                parse_expr_import(parser)?
+                parse_expr_import(scope, parser)?
             }
-            TokenType::KeywordThis => Node::new(t.loc().clone(), Syntax::ThisExpr {}),
-            TokenType::LiteralTrue | TokenType::LiteralFalse => Node::new(
+            TokenType::KeywordThis => {
+                parser.create_node(scope, t.loc().clone(), Syntax::ThisExpr {})
+            }
+            TokenType::LiteralTrue | TokenType::LiteralFalse => parser.create_node(
+                scope,
                 t.loc().clone(),
                 Syntax::LiteralBooleanExpr {
                     value: t.typ() == TokenType::LiteralTrue,
                 },
             ),
-            TokenType::LiteralNull => Node::new(t.loc().clone(), Syntax::LiteralNull {}),
-            TokenType::LiteralNumber => Node::new(
+            TokenType::LiteralNull => {
+                parser.create_node(scope, t.loc().clone(), Syntax::LiteralNull {})
+            }
+            TokenType::LiteralNumber => parser.create_node(
+                scope,
                 t.loc().clone(),
                 Syntax::LiteralNumberExpr {
                     value: normalise_literal_number(t.loc())?,
                 },
             ),
-            TokenType::LiteralRegex => Node::new(t.loc().clone(), Syntax::LiteralRegexExpr {}),
-            TokenType::LiteralString => Node::new(
+            TokenType::LiteralRegex => {
+                parser.create_node(scope, t.loc().clone(), Syntax::LiteralRegexExpr {})
+            }
+            TokenType::LiteralString => parser.create_node(
+                scope,
                 t.loc().clone(),
                 Syntax::LiteralStringExpr {
                     value: normalise_literal_string(t.loc())?,
                 },
             ),
-            TokenType::LiteralUndefined => Node::new(t.loc().clone(), Syntax::LiteralUndefined {}),
+            TokenType::LiteralUndefined => {
+                parser.create_node(scope, t.loc().clone(), Syntax::LiteralUndefined {})
+            }
             TokenType::ParenthesisOpen => {
                 parser.restore_checkpoint(cp);
-                parse_expr_arrow_function_or_grouping(parser, terminator_a, terminator_b, asi)?
+                parse_expr_arrow_function_or_grouping(
+                    scope,
+                    parser,
+                    terminator_a,
+                    terminator_b,
+                    asi,
+                )?
             }
             _ => return Err(t.error(SyntaxErrorType::ExpectedSyntax("expression operand"))),
         }
@@ -394,14 +487,15 @@ fn parse_expr_operand(
 }
 
 pub fn parse_expr_with_min_prec(
+    scope: ScopeId,
     parser: &mut Parser,
     min_prec: u8,
     terminator_a: TokenType,
     terminator_b: TokenType,
     parenthesised: bool,
     asi: &mut Asi,
-) -> TsResult<Node> {
-    let mut left = parse_expr_operand(parser, terminator_a, terminator_b, asi)?;
+) -> TsResult<NodeId> {
+    let mut left = parse_expr_operand(scope, parser, terminator_a, terminator_b, asi)?;
 
     loop {
         let cp = parser.checkpoint();
@@ -425,8 +519,9 @@ pub fn parse_expr_with_min_prec(
                     parser.restore_checkpoint(cp);
                     break;
                 };
-                left = Node::new(
-                    left.loc() + t.loc(),
+                left = parser.create_node(
+                    scope,
+                    parser[left].loc() + t.loc(),
                     Syntax::UnaryPostfixExpr {
                         parenthesised: false,
                         operator: operator_name,
@@ -462,10 +557,11 @@ pub fn parse_expr_with_min_prec(
 
                 left = match operator.name {
                     OperatorName::Call => {
-                        let arguments = parse_call_args(parser)?;
+                        let arguments = parse_call_args(scope, parser)?;
                         let end = parser.require(TokenType::ParenthesisClose)?;
-                        Node::new(
-                            left.loc() + end.loc(),
+                        parser.create_node(
+                            scope,
+                            parser[left].loc() + end.loc(),
                             Syntax::CallExpr {
                                 parenthesised: false,
                                 arguments,
@@ -474,10 +570,11 @@ pub fn parse_expr_with_min_prec(
                         )
                     }
                     OperatorName::ComputedMemberAccess => {
-                        let member = parse_expr(parser, TokenType::BracketClose)?;
+                        let member = parse_expr(scope, parser, TokenType::BracketClose)?;
                         let end = parser.require(TokenType::BracketClose)?;
-                        Node::new(
-                            left.loc() + end.loc(),
+                        parser.create_node(
+                            scope,
+                            parser[left].loc() + end.loc(),
                             Syntax::ComputedMemberExpr {
                                 object: left,
                                 member,
@@ -485,9 +582,10 @@ pub fn parse_expr_with_min_prec(
                         )
                     }
                     OperatorName::Conditional => {
-                        let consequent = parse_expr(parser, TokenType::Colon)?;
+                        let consequent = parse_expr(scope, parser, TokenType::Colon)?;
                         parser.require(TokenType::Colon)?;
                         let alternate = parse_expr_with_min_prec(
+                            scope,
                             parser,
                             next_min_prec,
                             terminator_a,
@@ -495,8 +593,9 @@ pub fn parse_expr_with_min_prec(
                             false,
                             asi,
                         )?;
-                        Node::new(
-                            left.loc() + alternate.loc(),
+                        parser.create_node(
+                            scope,
+                            parser[left].loc() + parser[alternate].loc(),
                             Syntax::ConditionalExpr {
                                 parenthesised: false,
                                 test: left,
@@ -505,20 +604,27 @@ pub fn parse_expr_with_min_prec(
                             },
                         )
                     }
-                    OperatorName::MemberAccess
-                        if KEYWORDS_MAPPING.contains_key(&parser.peek()?.typ()) =>
-                    {
-                        // Special handling of member access on keyword (which would fail normal parsing).
-                        let right_loc = parser.next()?.loc_take();
-                        let right = Node::new(
-                            right_loc.clone(),
-                            Syntax::IdentifierExpr { name: right_loc },
-                        );
-                        Node::new(
-                            left.loc() + right.loc(),
-                            Syntax::BinaryExpr {
+                    OperatorName::MemberAccess | OperatorName::OptionalChainingMemberAccess => {
+                        let right_tok = parser.next()?;
+                        match right_tok.typ() {
+                            TokenType::Identifier => {}
+                            t if KEYWORDS_MAPPING.contains_key(&t) => {}
+                            _ => {
+                                return Err(right_tok.error(SyntaxErrorType::ExpectedSyntax(
+                                    "member access property",
+                                )))
+                            }
+                        };
+                        let right = right_tok.loc_take();
+                        parser.create_node(
+                            scope,
+                            parser[left].loc() + &right,
+                            Syntax::MemberAccessExpr {
                                 parenthesised: false,
-                                operator: operator.name,
+                                optional_chaining: match operator.name {
+                                    OperatorName::OptionalChainingMemberAccess => true,
+                                    _ => false,
+                                },
                                 left,
                                 right,
                             },
@@ -526,6 +632,7 @@ pub fn parse_expr_with_min_prec(
                     }
                     _ => {
                         let right = parse_expr_with_min_prec(
+                            scope,
                             parser,
                             next_min_prec,
                             terminator_a,
@@ -533,8 +640,9 @@ pub fn parse_expr_with_min_prec(
                             false,
                             asi,
                         )?;
-                        Node::new(
-                            left.loc() + right.loc(),
+                        parser.create_node(
+                            scope,
+                            parser[left].loc() + parser[right].loc(),
                             Syntax::BinaryExpr {
                                 parenthesised: false,
                                 operator: operator.name,
@@ -549,8 +657,12 @@ pub fn parse_expr_with_min_prec(
     }
 
     if parenthesised {
-        match left.stx_mut() {
-            Syntax::CallExpr {
+        match parser[left].stx_mut() {
+            Syntax::BinaryExpr {
+                ref mut parenthesised,
+                ..
+            }
+            | Syntax::CallExpr {
                 ref mut parenthesised,
                 ..
             }
@@ -562,11 +674,11 @@ pub fn parse_expr_with_min_prec(
                 ref mut parenthesised,
                 ..
             }
-            | Syntax::UnaryExpr {
+            | Syntax::MemberAccessExpr {
                 ref mut parenthesised,
                 ..
             }
-            | Syntax::BinaryExpr {
+            | Syntax::UnaryExpr {
                 ref mut parenthesised,
                 ..
             } => {

@@ -1,0 +1,102 @@
+{
+  "$t": "ArrowFunctionExpr",
+  "signature": {
+    "$t": "FunctionSignature",
+    "parameters": [
+      {
+        "$t": "ParamDecl",
+        "rest": false,
+        "pattern": {
+          "$t": "IdentifierPattern",
+          "name": "a"
+        },
+        "default_value": null
+      },
+      {
+        "$t": "ParamDecl",
+        "rest": false,
+        "pattern": {
+          "$t": "IdentifierPattern",
+          "name": "b"
+        },
+        "default_value": null
+      },
+      {
+        "$t": "ParamDecl",
+        "rest": false,
+        "pattern": {
+          "$t": "IdentifierPattern",
+          "name": "c"
+        },
+        "default_value": null
+      }
+    ]
+  },
+  "body": {
+    "$t": "ArrowFunctionExpr",
+    "signature": {
+      "$t": "FunctionSignature",
+      "parameters": [
+        {
+          "$t": "ParamDecl",
+          "rest": false,
+          "pattern": {
+            "$t": "IdentifierPattern",
+            "name": "x"
+          },
+          "default_value": null
+        }
+      ]
+    },
+    "body": {
+      "$t": "ConditionalExpr",
+      "parenthesised": false,
+      "test": {
+        "$t": "LiteralNumberExpr",
+        "value": 1.0
+      },
+      "consequent": {
+        "$t": "ConditionalExpr",
+        "parenthesised": false,
+        "test": {
+          "$t": "CallExpr",
+          "parenthesised": false,
+          "callee": {
+            "$t": "ArrowFunctionExpr",
+            "signature": {
+              "$t": "FunctionSignature",
+              "parameters": [
+                {
+                  "$t": "ParamDecl",
+                  "rest": false,
+                  "pattern": {
+                    "$t": "IdentifierPattern",
+                    "name": "y"
+                  },
+                  "default_value": null
+                }
+              ]
+            },
+            "body": {
+              "$t": "LiteralNumberExpr",
+              "value": 2.0
+            }
+          },
+          "arguments": []
+        },
+        "consequent": {
+          "$t": "LiteralNumberExpr",
+          "value": 3.0
+        },
+        "alternate": {
+          "$t": "LiteralNumberExpr",
+          "value": 4.0
+        }
+      },
+      "alternate": {
+        "$t": "LiteralNumberExpr",
+        "value": 5.0
+      }
+    }
+  }
+}

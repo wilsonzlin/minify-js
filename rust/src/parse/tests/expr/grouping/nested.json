@@ -1,0 +1,31 @@
+{
+  "$t": "BinaryExpr",
+  "parenthesised": false,
+  "operator": "Division",
+  "left": {
+    "$t": "BinaryExpr",
+    "parenthesised": true,
+    "operator": "Division",
+    "left": {
+      "$t": "IdentifierExpr",
+      "name": "a"
+    },
+    "right": {
+      "$t": "IdentifierExpr",
+      "name": "b"
+    }
+  },
+  "right": {
+    "$t": "BinaryExpr",
+    "parenthesised": true,
+    "operator": "Division",
+    "left": {
+      "$t": "IdentifierExpr",
+      "name": "c"
+    },
+    "right": {
+      "$t": "IdentifierExpr",
+      "name": "d"
+    }
+  }
+}

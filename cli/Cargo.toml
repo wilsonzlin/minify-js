@@ -8,3 +8,4 @@ version = "0.0.2"
 
 [dependencies]
 minify-js = { path = "../rust" }
+structopt = "0.3"
