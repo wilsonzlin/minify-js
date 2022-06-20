@@ -2,4 +2,8 @@
 
 set -Eeuo pipefail
 
+pushd "$(dirname "$0")" >/dev/null
+
 go build -o run
+
+popd >/dev/null

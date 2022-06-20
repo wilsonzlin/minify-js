@@ -38,11 +38,13 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
             members,
         } => todo!(),
         Syntax::FunctionDecl {
+            generator,
             name,
             signature,
             body,
         } => json!({
             "$t": "FunctionDecl",
+            "generator": generator,
             "name": visit_node(m, *name),
             "signature": visit_node(m, *signature),
             "body": visit_node(m, *body),
@@ -111,12 +113,14 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
         }),
         Syntax::FunctionExpr {
             parenthesised,
+            generator,
             name,
             signature,
             body,
         } => json!({
             "$t": "FunctionExpr",
             "parenthesised": parenthesised,
+            "generator": generator,
             "name": name.as_ref().map(|n| visit_node(m, *n)),
             "signature": visit_node(m, *signature),
             "body": visit_node(m, *body),

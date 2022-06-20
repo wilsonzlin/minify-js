@@ -284,6 +284,7 @@ pub enum Syntax {
         members: Vec<ClassMember>,
     },
     FunctionDecl {
+        generator: bool,
         name: NodeId,
         signature: NodeId,
         body: Statement,
@@ -326,6 +327,7 @@ pub enum Syntax {
     },
     FunctionExpr {
         parenthesised: bool,
+        generator: bool,
         name: Option<NodeId>,
         signature: NodeId,
         body: Statement,

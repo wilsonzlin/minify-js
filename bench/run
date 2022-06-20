@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+shopt -s nullglob
+
+pushd "$(dirname "$0")" >/dev/null
+
+for input in _input/*; do
+  echo "# $input"
+  echo "========"
+  for candidate in esbuild minify-js; do
+    echo -n "$candidate"
+    "./$candidate/run" "$PWD/$input" 10
+  done
+  echo
+done
+
+popd >/dev/null

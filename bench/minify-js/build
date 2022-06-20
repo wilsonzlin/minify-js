@@ -2,5 +2,9 @@
 
 set -Eeuo pipefail
 
+pushd "$(dirname "$0")" >/dev/null
+
 bin_path="$(cargo build --release --message-format=json | jq -r '.executable | select(. != null)')"
 ln -fsv "$bin_path" ./run
+
+popd >/dev/null

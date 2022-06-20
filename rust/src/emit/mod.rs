@@ -273,11 +273,17 @@ fn emit_js_under_operator<T: Write>(
             out.write_all(b"}")?;
         }
         Syntax::FunctionDecl {
+            generator,
             name,
             signature,
             body,
         } => {
-            out.write_all(b"function ")?;
+            out.write_all(b"function")?;
+            if *generator {
+                out.write_all(b"*")?;
+            } else {
+                out.write_all(b" ")?;
+            };
             emit_js(out, map, *name)?;
             out.write_all(b"(")?;
             emit_js(out, map, *signature)?;
@@ -407,6 +413,7 @@ fn emit_js_under_operator<T: Write>(
         }
         Syntax::FunctionExpr {
             parenthesised,
+            generator,
             name,
             signature,
             body,
@@ -417,8 +424,13 @@ fn emit_js_under_operator<T: Write>(
                 out.write_all(b"(")?;
             }
             out.write_all(b"function")?;
+            if *generator {
+                out.write_all(b"*")?;
+            };
             if let Some(name) = name {
-                out.write_all(b" ")?;
+                if !generator {
+                    out.write_all(b" ")?;
+                };
                 emit_js(out, map, *name);
             };
             out.write_all(b"(")?;

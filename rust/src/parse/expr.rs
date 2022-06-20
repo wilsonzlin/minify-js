@@ -356,6 +356,7 @@ pub fn parse_expr_import(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId
 pub fn parse_expr_function(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId> {
     let fn_scope = parser.create_child_scope(scope, ScopeType::Closure);
     let start = parser.require(TokenType::KeywordFunction)?.loc().clone();
+    let generator = parser.consume_if(TokenType::Asterisk)?.is_match();
     let name = match parser.consume_if(TokenType::Identifier)?.match_loc_take() {
         Some(name) => {
             let name_node = parser.create_node(
@@ -375,6 +376,7 @@ pub fn parse_expr_function(scope: ScopeId, parser: &mut Parser) -> TsResult<Node
         &start + parser[body].loc(),
         Syntax::FunctionExpr {
             parenthesised: false,
+            generator,
             name,
             signature,
             body,

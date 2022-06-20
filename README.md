@@ -39,7 +39,6 @@ assert_eq!(out.get_ref().as_slice(), b"let x=1;");
 
 ## In progress
 
-- Minify identifiers.
 - Combine and reorder declarations.
 - Omit more semicolons, spaces, parentheses, and braces.
 - More extensive testing, especially over rare syntax.
@@ -52,7 +51,6 @@ assert_eq!(out.get_ref().as_slice(), b"let x=1;");
 - Better support for non-ASCII syntax.
 - Replacing if statements with conditional and logical expressions.
 - Aliasing repeated identical literal values.
-- Unwrapping blocks.
 - Micro-optimisations:
   - Unwrap string literal computed members, then identifier or number string members.
   - Replace `x === null || x === undefined` with `x == null`, where `x` is side-effect free.
@@ -62,3 +60,4 @@ assert_eq!(out.get_ref().as_slice(), b"let x=1;");
   - Replace `return undefined` with `return`.
   - Replace `const` with `let`.
   - Hoist `let` and `const`.
+  - Unwrapping blocks.

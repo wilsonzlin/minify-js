@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+shopt -s nullglob
+
+pushd "$(dirname "$0")" >/dev/null
+
+for candidate in esbuild minify-js; do
+  echo "$candidate"
+  "./$candidate/build"
+done
+
+popd >/dev/null

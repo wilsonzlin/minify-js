@@ -83,6 +83,7 @@ pub fn parse_decl_var(
 pub fn parse_decl_function(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId> {
     let fn_scope = parser.create_child_scope(scope, ScopeType::Closure);
     let start = parser.require(TokenType::KeywordFunction)?.loc().clone();
+    let generator = parser.consume_if(TokenType::Asterisk)?.is_match();
     let name = parser.require(TokenType::Identifier)?.loc().clone();
     let name_node = parser.create_node(
         fn_scope,
@@ -96,6 +97,7 @@ pub fn parse_decl_function(scope: ScopeId, parser: &mut Parser) -> TsResult<Node
         scope,
         &start + parser[body].loc(),
         Syntax::FunctionDecl {
+            generator,
             name: name_node,
             signature,
             body,
