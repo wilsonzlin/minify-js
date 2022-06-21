@@ -8,9 +8,10 @@
     "operator": "New",
     "argument": {
       "$t": "CallExpr",
+      "optional_chaining": false,
       "parenthesised": false,
       "callee": {
-        "$t": "MemberAccessExpr",
+        "$t": "MemberExpr",
         "parenthesised": false,
         "optional_chaining": true,
         "left": {

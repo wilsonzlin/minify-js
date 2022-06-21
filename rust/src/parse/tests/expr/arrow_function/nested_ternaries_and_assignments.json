@@ -3,7 +3,7 @@
   "parenthesised": false,
   "operator": "Assignment",
   "left": {
-    "$t": "IdentifierExpr",
+    "$t": "IdentifierPattern",
     "name": "x"
   },
   "right": {

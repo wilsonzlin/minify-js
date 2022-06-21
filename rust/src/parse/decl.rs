@@ -92,6 +92,8 @@ pub fn parse_decl_function(
     let fn_scope = parser.create_child_scope(scope, ScopeType::Closure);
     let start = parser.require(TokenType::KeywordFunction)?.loc().clone();
     let generator = parser.consume_if(TokenType::Asterisk)?.is_match();
+    // WARNING: The name belongs in the containing scope, not the function's scope.
+    // For example, `function a() { let a = 1; }` is legal.
     let name = match parser.next()? {
         t if is_valid_pattern_identifier(t.typ(), syntax) => t,
         t => return Err(t.error(SyntaxErrorType::ExpectedSyntax("function name"))),
@@ -99,7 +101,7 @@ pub fn parse_decl_function(
     .loc()
     .clone();
     let name_node = parser.create_node(
-        fn_scope,
+        scope,
         name.clone(),
         Syntax::ClassOrFunctionName { name: name.clone() },
     );

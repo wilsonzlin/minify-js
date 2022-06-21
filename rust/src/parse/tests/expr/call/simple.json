@@ -1,5 +1,6 @@
 {
   "$t": "CallExpr",
+  "optional_chaining": false,
   "parenthesised": false,
   "callee": {
     "$t": "IdentifierExpr",
@@ -7,16 +8,28 @@
   },
   "arguments": [
     {
-      "$t": "LiteralNumberExpr",
-      "value": 1.0
+      "$t": "CallArg",
+      "spread": false,
+      "value": {
+        "$t": "LiteralNumberExpr",
+        "value": 1.0
+      }
     },
     {
-      "$t": "LiteralNumberExpr",
-      "value": 2.0
+      "$t": "CallArg",
+      "spread": false,
+      "value": {
+        "$t": "LiteralNumberExpr",
+        "value": 2.0
+      }
     },
     {
-      "$t": "LiteralNumberExpr",
-      "value": 3.0
+      "$t": "CallArg",
+      "spread": false,
+      "value": {
+        "$t": "LiteralNumberExpr",
+        "value": 3.0
+      }
     }
   ]
 }

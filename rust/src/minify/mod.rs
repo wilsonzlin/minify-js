@@ -12,11 +12,11 @@ use crate::{
 };
 
 const ALT_MINIFIED_NAMES: &'static [char] = &[
-    '\u{02B0}', '\u{02B1}', '\u{02B2}', '\u{02B3}', '\u{02B4}', '\u{02B5}', '\u{02B6}', '\u{02B7}',
-    '\u{02B8}', '\u{02B9}', '\u{02BA}', '\u{02BB}', '\u{02BC}', '\u{02BD}', '\u{02BE}', '\u{02BF}',
-    '\u{02C0}', '\u{02C1}', '\u{02C6}', '\u{02C7}', '\u{02C8}', '\u{02C9}', '\u{02CA}', '\u{02CB}',
-    '\u{02CC}', '\u{02CD}', '\u{02CE}', '\u{02CF}', '\u{02D0}', '\u{02D1}', '\u{02E0}', '\u{02E1}',
-    '\u{02E2}', '\u{02E3}', '\u{02E4}', '\u{02EC}', '\u{02EE}', '\u{0300}', '\u{0374}', '\u{037A}',
+    '\u{01BB}', '\u{02B0}', '\u{02B1}', '\u{02B2}', '\u{02B3}', '\u{02B4}', '\u{02B5}', '\u{02B6}',
+    '\u{02B7}', '\u{02B8}', '\u{02B9}', '\u{02BA}', '\u{02BB}', '\u{02BC}', '\u{02BD}', '\u{02BE}',
+    '\u{02BF}', '\u{02C0}', '\u{02C1}', '\u{02C6}', '\u{02C7}', '\u{02C8}', '\u{02C9}', '\u{02CA}',
+    '\u{02CB}', '\u{02CC}', '\u{02CD}', '\u{02CE}', '\u{02CF}', '\u{02D0}', '\u{02D1}', '\u{02E0}',
+    '\u{02E1}', '\u{02E2}', '\u{02E3}', '\u{02E4}', '\u{02EC}', '\u{02EE}', '\u{0374}', '\u{037A}',
     '\u{0559}', '\u{0640}', '\u{06E5}', '\u{06E6}', '\u{07F4}', '\u{07F5}', '\u{07FA}',
 ];
 
@@ -101,7 +101,9 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
             visit_node(s, m, updates, *signature);
             visit_node(s, m, updates, *body);
         }
-        stx @ (Syntax::IdentifierPattern { name } | Syntax::ClassOrFunctionName { name }) => {
+        stx @ (Syntax::IdentifierPattern { name }
+        | Syntax::IdentifierExpr { name }
+        | Syntax::ClassOrFunctionName { name }) => {
             let sym = scope.find_symbol(s, name);
             if let Some(sym) = sym {
                 let minified = generate_minified_name(sym.minified_name_id());
@@ -111,6 +113,9 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
                     minified.clone(),
                     match stx {
                         Syntax::IdentifierPattern { .. } => Syntax::IdentifierPattern {
+                            name: minified.clone(),
+                        },
+                        Syntax::IdentifierExpr { .. } => Syntax::IdentifierExpr {
                             name: minified.clone(),
                         },
                         Syntax::ClassOrFunctionName { .. } => Syntax::ClassOrFunctionName {
@@ -260,20 +265,6 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
             for p in parameters {
                 visit_node(s, m, updates, *p);
             }
-        }
-        Syntax::IdentifierExpr { name } => {
-            let sym = scope.find_symbol(s, name);
-            if let Some(sym) = sym {
-                let minified = generate_minified_name(sym.minified_name_id());
-                updates.replace_node(
-                    n,
-                    scope_id,
-                    minified.clone(),
-                    Syntax::IdentifierExpr {
-                        name: minified.clone(),
-                    },
-                );
-            };
         }
         Syntax::IfStmt {
             test,

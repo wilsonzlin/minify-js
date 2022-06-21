@@ -60,6 +60,7 @@
         "parenthesised": false,
         "test": {
           "$t": "CallExpr",
+          "optional_chaining": false,
           "parenthesised": false,
           "callee": {
             "$t": "ArrowFunctionExpr",

@@ -8,6 +8,7 @@
     "operator": "New",
     "argument": {
       "$t": "CallExpr",
+      "optional_chaining": false,
       "parenthesised": false,
       "callee": {
         "$t": "IdentifierExpr",

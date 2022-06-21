@@ -350,17 +350,22 @@ pub fn parse_expr_function(
     let fn_scope = parser.create_child_scope(scope, ScopeType::Closure);
     let start = parser.require(TokenType::KeywordFunction)?.loc().clone();
     let generator = parser.consume_if(TokenType::Asterisk)?.is_match();
-    let name = match parser.consume_if(TokenType::Identifier)?.match_loc_take() {
-        Some(name) => {
+    // WARNING: The name belongs in the containing scope, not the function's scope.
+    // For example, `function a() { let a = 1; }` is legal.
+    let name = match parser.peek()? {
+        t if is_valid_pattern_identifier(t.typ(), syntax) => {
+            parser.consume_peeked();
             let name_node = parser.create_node(
-                fn_scope,
-                name.clone(),
-                Syntax::ClassOrFunctionName { name: name.clone() },
+                scope,
+                t.loc().clone(),
+                Syntax::ClassOrFunctionName {
+                    name: t.loc().clone(),
+                },
             );
-            parser[fn_scope].add_symbol(name.clone(), Symbol::new(name_node))?;
+            parser[scope].add_symbol(t.loc().clone(), Symbol::new(name_node))?;
             Some(name_node)
         }
-        None => None,
+        _ => None,
     };
     let signature = parse_signature_function(fn_scope, parser, syntax)?;
     let body = parse_stmt_block(fn_scope, parser, syntax)?;

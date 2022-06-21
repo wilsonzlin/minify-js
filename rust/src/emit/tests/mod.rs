@@ -31,11 +31,15 @@ fn test_emit() {
             com.java.names.long
             module.functions
 
+            function this_is_a_function_decl_not_expr() {
+              this_is_a_function_decl_not_expr()
+            }
+
             var the = 1, quick, { brown, _: [ fox, jumped, , , ...over ], ...lazy } = i;
 
-            (( {the} = 1, [quick] = 2 ) => {
+            (( {the} = this_is_a_function_decl_not_expr, [quick] = 2 ) => {
               {
-                let brown = fox;
+                let brown = this_is_a_function_decl_not_expr(fox);
               }
               the,quick,brown,fox
               ;
@@ -48,12 +52,13 @@ fn test_emit() {
           }()
         "#,
         "\
-        function*a(){yield*\"hello world!\";}\
+        function*gen(){yield*\"hello world!\";}\
         !()=>{\
         com.java.names.long;\
         module.functions;\
+        function a(){a();}\
         var b=1,c,{brown:d,_:[e,f,,,...g],...h}=i;\
-        ({the:l}=1,[m]=2)=>{{let n=e;}l,m,d,e;return ;1.2.toString();}();\
+        ({the:l}=a,[m]=2)=>{{let n=a(e);}l,m,d,e;return ;1.2.toString();}();;;\
         const i=({})=>{};\
         const j=l=>{},k=(1/7)/(2/7);\
         }();\

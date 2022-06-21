@@ -7,7 +7,7 @@
     "parenthesised": false,
     "operator": "New",
     "argument": {
-      "$t": "MemberAccessExpr",
+      "$t": "MemberExpr",
       "parenthesised": false,
       "optional_chaining": true,
       "left": {

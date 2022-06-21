@@ -15,12 +15,12 @@
         "parenthesised": false,
         "operator": "BitwiseNot",
         "argument": {
-          "$t": "MemberAccessExpr",
+          "$t": "MemberExpr",
           "parenthesised": false,
           "optional_chaining": false,
           "right": "ghi",
           "left": {
-            "$t": "MemberAccessExpr",
+            "$t": "MemberExpr",
             "parenthesised": false,
             "optional_chaining": true,
             "left": {
