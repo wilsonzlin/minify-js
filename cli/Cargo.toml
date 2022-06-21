@@ -5,6 +5,7 @@ edition = "2021"
 name = "minify-js-cli"
 publish = false
 version = "0.1.0"
+
 [dependencies]
 minify-js = { path = "../rust" }
 structopt = "0.3"

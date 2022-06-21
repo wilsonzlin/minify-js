@@ -97,7 +97,7 @@ for (const f of [
   replaceInFile(
     f,
     /^version = "\d+\.\d+\.\d+"\s*$/m,
-    `version = "${NEW_VERSION}"`
+    `version = "${NEW_VERSION}"\n`
   );
 }
 
