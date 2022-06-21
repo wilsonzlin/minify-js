@@ -14,6 +14,7 @@ mod minify;
 mod num;
 mod operator;
 mod parse;
+#[cfg(test)]
 mod serialise;
 mod source;
 mod symbol;

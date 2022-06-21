@@ -2,6 +2,7 @@ use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::ops::{Index, IndexMut};
 
+#[cfg(test)]
 use serde::Serialize;
 
 use crate::error::{SyntaxError, SyntaxErrorType};
@@ -119,7 +120,8 @@ type Expression = NodeId;
 type Pattern = NodeId;
 type Statement = NodeId;
 
-#[derive(Eq, PartialEq, Debug, Serialize)]
+#[derive(Eq, PartialEq, Debug)]
+#[cfg_attr(test, derive(Serialize))]
 pub enum VarDeclMode {
     Const,
     Let,

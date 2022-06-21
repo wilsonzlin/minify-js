@@ -2,10 +2,12 @@ use crate::operator::Arity::*;
 use crate::operator::Associativity::*;
 use crate::operator::OperatorName::*;
 use lazy_static::lazy_static;
+#[cfg(test)]
 use serde::Serialize;
 use std::collections::HashMap;
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Serialize)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+#[cfg_attr(test, derive(Serialize))]
 pub enum OperatorName {
     Addition,
     Assignment,
