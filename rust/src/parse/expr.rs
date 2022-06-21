@@ -16,7 +16,10 @@ use crate::symbol::{ScopeId, ScopeType, Symbol};
 use crate::token::TokenType;
 use crate::update::NodeUpdates;
 
-use super::class_or_object::{parse_class_or_object_member, ParseClassOrObjectMemberResult};
+use super::class_or_object::{
+    parse_class_body, parse_class_or_object_member, ParseClassBodyResult,
+    ParseClassOrObjectMemberResult,
+};
 use super::pattern::{is_valid_pattern_identifier, ParsePatternSyntax};
 use super::stmt::parse_stmt_block;
 
@@ -328,11 +331,14 @@ pub fn parse_expr_arrow_function_or_grouping(
     ))
 }
 
-pub fn parse_expr_import(scope: ScopeId, parser: &mut Parser) -> SyntaxResult<NodeId> {
+pub fn parse_expr_import(
+    scope: ScopeId,
+    parser: &mut Parser,
+    syntax: &ParsePatternSyntax,
+) -> SyntaxResult<NodeId> {
     let start = parser.require(TokenType::KeywordImport)?;
     parser.require(TokenType::ParenthesisOpen)?;
-    // TODO Non-literal-string imports.
-    let module = parse_and_normalise_literal_string(parser)?;
+    let module = parse_expr(scope, parser, TokenType::ParenthesisClose, syntax)?;
     parser.require(TokenType::ParenthesisClose)?;
     let end = parser.require(TokenType::ParenthesisClose)?;
     Ok(parser.create_node(
@@ -377,6 +383,45 @@ pub fn parse_expr_function(
             name,
             signature,
             body,
+        },
+    ))
+}
+
+pub fn parse_expr_class(
+    scope: ScopeId,
+    parser: &mut Parser,
+    syntax: &ParsePatternSyntax,
+) -> SyntaxResult<NodeId> {
+    let start = parser.require(TokenType::KeywordClass)?.loc().clone();
+    let name = match parser.peek()? {
+        t if is_valid_pattern_identifier(t.typ(), syntax) => {
+            parser.consume_peeked();
+            let name_node = parser.create_node(
+                scope,
+                t.loc().clone(),
+                Syntax::ClassOrFunctionName {
+                    name: t.loc().clone(),
+                },
+            );
+            parser[scope].add_symbol(t.loc().clone(), Symbol::new(name_node))?;
+            Some(name_node)
+        }
+        _ => None,
+    };
+    let extends = if parser.consume_if(TokenType::KeywordExtends)?.is_match() {
+        Some(parse_expr(scope, parser, TokenType::BraceOpen, syntax)?)
+    } else {
+        None
+    };
+    let ParseClassBodyResult { end, members } = parse_class_body(scope, parser, syntax)?;
+    Ok(parser.create_node(
+        scope,
+        &start + &end,
+        Syntax::ClassExpr {
+            parenthesised: false,
+            name,
+            extends,
+            members,
         },
     ))
 }
@@ -497,13 +542,17 @@ fn parse_expr_operand(
                     )
                 }
             }
+            TokenType::KeywordClass => {
+                parser.restore_checkpoint(cp);
+                parse_expr_class(scope, parser, syntax)?
+            }
             TokenType::KeywordFunction => {
                 parser.restore_checkpoint(cp);
                 parse_expr_function(scope, parser, syntax)?
             }
             TokenType::KeywordImport => {
                 parser.restore_checkpoint(cp);
-                parse_expr_import(scope, parser)?
+                parse_expr_import(scope, parser, syntax)?
             }
             TokenType::KeywordSuper => {
                 parser.create_node(scope, t.loc().clone(), Syntax::SuperExpr {})

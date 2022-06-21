@@ -1,4 +1,4 @@
-use crate::ast::{ClassMember, NodeId, Syntax, VarDeclMode, VariableDeclarator};
+use crate::ast::{NodeId, Syntax, VarDeclMode, VariableDeclarator};
 use crate::error::{SyntaxErrorType, SyntaxResult};
 use crate::parse::parser::Parser;
 use crate::parse::pattern::parse_pattern;
@@ -7,7 +7,7 @@ use crate::parse::stmt::parse_stmt_block;
 use crate::symbol::{ScopeId, ScopeType, Symbol};
 use crate::token::TokenType;
 
-use super::class_or_object::{parse_class_or_object_member, ParseClassOrObjectMemberResult};
+use super::class_or_object::{parse_class_body, ParseClassBodyResult};
 use super::expr::{parse_expr, parse_expr_until_either_with_asi, Asi};
 use super::pattern::{is_valid_pattern_identifier, ParsePatternAction, ParsePatternSyntax};
 
@@ -141,26 +141,10 @@ pub fn parse_decl_class(
     } else {
         None
     };
-    parser.require(TokenType::BraceOpen)?;
-    let mut members = Vec::<ClassMember>::new();
-    while parser.peek()?.typ() != TokenType::BraceClose {
-        // `static` must always come first if present.
-        let statik = parser.consume_if(TokenType::KeywordStatic)?.is_match();
-        let ParseClassOrObjectMemberResult { key, value } = parse_class_or_object_member(
-            scope,
-            parser,
-            TokenType::Equals,
-            TokenType::Semicolon,
-            &mut Asi::can(),
-            syntax,
-        )?;
-        parser.consume_if(TokenType::Semicolon)?;
-        members.push(ClassMember { key, statik, value });
-    }
-    let end = parser.require(TokenType::BraceClose)?;
+    let ParseClassBodyResult { end, members } = parse_class_body(scope, parser, syntax)?;
     Ok(parser.create_node(
         scope,
-        &start + end.loc(),
+        &start + &end,
         Syntax::ClassDecl {
             name: name_node,
             extends,

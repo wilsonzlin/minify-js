@@ -5,6 +5,47 @@ use crate::ast::{
     ForStmtHeader, ForThreeInit, LiteralTemplatePart, NodeId, NodeMap, ObjectMemberType, Syntax,
 };
 
+fn visit_class_or_object_member_key(m: &NodeMap, key: &ClassOrObjectMemberKey) -> Value {
+    match key {
+        ClassOrObjectMemberKey::Direct(r) => json!(r.as_str().to_string()),
+        ClassOrObjectMemberKey::Computed(e) => visit_node(m, *e),
+    }
+}
+
+fn visit_class_or_object_member_value(m: &NodeMap, value: &ClassOrObjectMemberValue) -> Value {
+    match value {
+        ClassOrObjectMemberValue::Getter { body } => json!({
+            "getter": json!({
+                "body": visit_node(m, *body),
+            }),
+        }),
+        ClassOrObjectMemberValue::Method {
+            is_async,
+            generator,
+            signature,
+            body,
+        } => json!({
+            "method": json!({
+                "async": is_async,
+                "generator": generator,
+                "signature": visit_node(m, *signature),
+                "body": visit_node(m, *body),
+            }),
+        }),
+        ClassOrObjectMemberValue::Property { initializer } => json!({
+            "property": json!({
+                "initializer": initializer.map(|n| visit_node(m, n)),
+            }),
+        }),
+        ClassOrObjectMemberValue::Setter { parameter, body } => json!({
+            "setter": json!({
+                "parameter": visit_node(m, *parameter),
+                "body": visit_node(m, *body),
+            }),
+        }),
+    }
+}
+
 fn visit_node(m: &NodeMap, n: NodeId) -> Value {
     match m[n].stx() {
         Syntax::IdentifierPattern { name } => json!({
@@ -36,13 +77,32 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
             name,
             extends,
             members,
-        } => todo!(),
+        } => json!({
+            "$t": "ClassDecl",
+            "name": visit_node(m, *name),
+            "extends": extends.map(|n| visit_node(m, n)),
+            "members": members.iter().map(|mem| json!({
+                "static": mem.statik,
+                "key": visit_class_or_object_member_key(m, &mem.key),
+                "value": visit_class_or_object_member_value(m, &mem.value),
+            })).collect::<Vec<_>>(),
+        }),
         Syntax::ClassExpr {
             parenthesised,
             name,
             extends,
             members,
-        } => todo!(),
+        } => json!({
+            "$t": "ClassExpr",
+            "parenthesised": parenthesised,
+            "name": name.map(|n| visit_node(m, n)),
+            "extends": extends.map(|n| visit_node(m, n)),
+            "members": members.iter().map(|mem| json!({
+                "static": mem.statik,
+                "key": visit_class_or_object_member_key(m, &mem.key),
+                "value": visit_class_or_object_member_value(m, &mem.value),
+            })).collect::<Vec<_>>(),
+        }),
         Syntax::FunctionDecl {
             generator,
             name,
@@ -144,7 +204,7 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
         }),
         Syntax::ImportExpr { module } => json!({
             "$t": "ImportExpr",
-           "module": module,
+           "module": visit_node(m, *module),
         }),
         Syntax::LiteralArrayExpr { elements } => json!({
             "$t": "LiteralArrayExpr",
@@ -217,19 +277,18 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
             "operator": operator,
             "argument": visit_node(m, *argument),
         }),
-        Syntax::YieldExpr { argument, delegate } => json!({
-            "$t": "YieldExpr",
-            "argument": visit_node(m, *argument),
-            "delegate": delegate,
-        }),
         Syntax::BlockStmt { body } => json!({
             "$t": "BlockStmt",
             "body": body.iter().map(|n| visit_node(m, *n)).collect::<Vec<_>>(),
         }),
         Syntax::BreakStmt { label } => json!({
-            "$t": "BreakStmt", "label": label.as_ref().map(|n| n.as_str().to_string()) }),
+            "$t": "BreakStmt",
+            "label": label.as_ref().map(|n| n.as_str().to_string()),
+        }),
         Syntax::ContinueStmt { label } => json!({
-            "$t": "ContinueStmt", "label": label.as_ref().map(|n| n.as_str().to_string()) }),
+            "$t": "ContinueStmt",
+            "label": label.as_ref().map(|n| n.as_str().to_string()),
+        }),
         Syntax::DebuggerStmt {} => json!({
             "$t": "DebuggerStmt",
         }),
@@ -242,9 +301,13 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
             "$t": "EmptyStmt",
         }),
         Syntax::ExportDeclStmt { declaration } => json!({
-            "$t": "ExportDeclStmt", "declaration": visit_node(m, *declaration) }),
+            "$t": "ExportDeclStmt",
+            "declaration": visit_node(m, *declaration),
+        }),
         Syntax::ExportDefaultStmt { expression } => json!({
-            "$t": "ExportDefaultStmt", "expression": visit_node(m, *expression) }),
+            "$t": "ExportDefaultStmt",
+            "expression": visit_node(m, *expression),
+        }),
         Syntax::ExportListStmt { names, from } => todo!(),
         Syntax::ExpressionStmt { expression } => json!({
             "$t": "ExpressionStmt",
@@ -358,36 +421,8 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
                 }),
                 ObjectMemberType::Valued { key, value } => json!({
                     "valued": json!({
-                        "key": match key {
-                            ClassOrObjectMemberKey::Direct(r) => json!(r.as_str().to_string()),
-                            ClassOrObjectMemberKey::Computed(e) => visit_node(m, *e),
-                        },
-                        "value": match value {
-                            ClassOrObjectMemberValue::Getter { body } => json!({
-                                "getter": json!({
-                                    "body": visit_node(m, *body),
-                                }),
-                            }),
-                            ClassOrObjectMemberValue::Method { is_async, generator, signature, body } => json!({
-                                "method": json!({
-                                    "async": is_async,
-                                    "generator": generator,
-                                    "signature": visit_node(m, *signature),
-                                    "body": visit_node(m, *body),
-                                }),
-                            }),
-                            ClassOrObjectMemberValue::Property { initializer } => json!({
-                                "property": json!({
-                                    "initializer": initializer.map(|n| visit_node(m, n)),
-                                }),
-                            }),
-                            ClassOrObjectMemberValue::Setter { parameter, body } => json!({
-                                "setter": json!({
-                                    "parameter": visit_node(m, *parameter),
-                                    "body": visit_node(m, *body),
-                                }),
-                            }),
-                        },
+                        "key": visit_class_or_object_member_key(m, key),
+                        "value": visit_class_or_object_member_value(m, value),
                     }),
                 }),
             },
@@ -398,10 +433,7 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
             default_value,
         } => json!({
             "$t": "ObjectPatternProperty",
-            "key": match key {
-                ClassOrObjectMemberKey::Direct(r) => json!(r.as_str().to_string()),
-                ClassOrObjectMemberKey::Computed(e) => visit_node(m, *e),
-            },
+            "key": visit_class_or_object_member_key(m, key),
             "target": target.map(|n| visit_node(m, n)),
             "default": default_value.map(|n| visit_node(m, n)),
         }),

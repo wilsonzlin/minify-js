@@ -277,12 +277,8 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
                 visit_node(s, m, updates, *alternate);
             };
         }
-        Syntax::ImportExpr { module } => todo!(),
-        Syntax::ImportStmt {
-            default,
-            names,
-            module,
-        } => todo!(),
+        Syntax::ImportExpr { module } => visit_node(s, m, updates, *module),
+        Syntax::ImportStmt { .. } => {}
         Syntax::LiteralArrayExpr { elements } => {
             for e in elements {
                 match e {

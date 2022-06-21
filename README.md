@@ -41,6 +41,7 @@ assert_eq!(out.get_ref().as_slice(), b"let x=1;");
 
 - Combine and reorder declarations.
 - Omit more semicolons, spaces, parentheses, and braces.
+- Minify import and export syntax.
 - More extensive testing, especially over rare syntax.
 - Evaluation and folding of constant expressions.
 - Parse and erase TypeScript syntax.

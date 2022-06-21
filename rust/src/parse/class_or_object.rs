@@ -1,7 +1,8 @@
 use crate::{
-    ast::{ClassOrObjectMemberKey, ClassOrObjectMemberValue},
+    ast::{ClassMember, ClassOrObjectMemberKey, ClassOrObjectMemberValue},
     error::SyntaxResult,
     lex::KEYWORDS_MAPPING,
+    source::SourceRange,
     symbol::{ScopeId, ScopeType},
     token::TokenType,
 };
@@ -13,6 +14,36 @@ use super::{
     signature::parse_signature_function,
     stmt::parse_stmt_block,
 };
+
+pub struct ParseClassBodyResult {
+    pub members: Vec<ClassMember>,
+    pub end: SourceRange,
+}
+
+pub fn parse_class_body(
+    scope: ScopeId,
+    parser: &mut Parser,
+    syntax: &ParsePatternSyntax,
+) -> SyntaxResult<ParseClassBodyResult> {
+    parser.require(TokenType::BraceOpen)?;
+    let mut members = Vec::<ClassMember>::new();
+    while parser.peek()?.typ() != TokenType::BraceClose {
+        // `static` must always come first if present.
+        let statik = parser.consume_if(TokenType::KeywordStatic)?.is_match();
+        let ParseClassOrObjectMemberResult { key, value } = parse_class_or_object_member(
+            scope,
+            parser,
+            TokenType::Equals,
+            TokenType::Semicolon,
+            &mut Asi::can(),
+            syntax,
+        )?;
+        parser.consume_if(TokenType::Semicolon)?;
+        members.push(ClassMember { key, statik, value });
+    }
+    let end = parser.require(TokenType::BraceClose)?.loc_take();
+    Ok(ParseClassBodyResult { members, end })
+}
 
 pub struct ParseClassOrObjectMemberResult {
     pub key: ClassOrObjectMemberKey,

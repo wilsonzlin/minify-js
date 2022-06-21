@@ -345,9 +345,8 @@ pub enum Syntax {
     IdentifierExpr {
         name: SourceRange,
     },
-    // TODO Non-literal-string imports.
     ImportExpr {
-        module: String,
+        module: Expression,
     },
     LiteralArrayExpr {
         elements: Vec<ArrayElement>,
