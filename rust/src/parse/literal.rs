@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use crate::ast::ClassOrObjectMemberKey;
-use crate::error::{SyntaxError, SyntaxErrorType, TsResult};
+use crate::error::{SyntaxError, SyntaxErrorType, SyntaxResult};
 use crate::num::JsNumber;
 use crate::parse::expr::parse_expr;
 use crate::parse::parser::Parser;
@@ -18,7 +18,7 @@ fn parse_radix(raw: &str, radix: u32) -> Result<f64, ()> {
         .map(|v| v as f64)
 }
 
-pub fn normalise_literal_number(raw: &SourceRange) -> TsResult<JsNumber> {
+pub fn normalise_literal_number(raw: &SourceRange) -> SyntaxResult<JsNumber> {
     // TODO We assume that the Rust parser follows ECMAScript spec and that different representations
     // of the same value get parsed into the same f64 value/bit pattern (e.g. `5.1e10` and `0.51e11`).
     match raw.as_str() {
@@ -31,12 +31,12 @@ pub fn normalise_literal_number(raw: &SourceRange) -> TsResult<JsNumber> {
     .map_err(|_| SyntaxError::from_loc(raw, SyntaxErrorType::MalformedLiteralNumber, None))
 }
 
-pub fn normalise_literal_string(raw: &SourceRange) -> TsResult<String> {
+pub fn normalise_literal_string(raw: &SourceRange) -> SyntaxResult<String> {
     // TODO Handle escapes.
     Ok(raw.as_str()[1..raw.len() - 1].to_string())
 }
 
-pub fn parse_and_normalise_literal_string(parser: &mut Parser) -> TsResult<String> {
+pub fn parse_and_normalise_literal_string(parser: &mut Parser) -> SyntaxResult<String> {
     let t = parser.require(TokenType::LiteralString)?;
     let s = normalise_literal_string(t.loc())?;
     Ok(s)
@@ -46,7 +46,7 @@ pub fn parse_class_or_object_member_key(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<ClassOrObjectMemberKey> {
+) -> SyntaxResult<ClassOrObjectMemberKey> {
     Ok(if parser.consume_if(TokenType::BracketOpen)?.is_match() {
         let expr = parse_expr(scope, parser, TokenType::BracketClose, syntax)?;
         parser.require(TokenType::BracketClose)?;

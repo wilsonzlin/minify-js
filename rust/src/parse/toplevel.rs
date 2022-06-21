@@ -1,5 +1,5 @@
 use crate::ast::{NodeId, Syntax};
-use crate::error::TsResult;
+use crate::error::SyntaxResult;
 use crate::parse::parser::Parser;
 use crate::parse::stmt::parse_stmt;
 use crate::symbol::ScopeId;
@@ -12,7 +12,7 @@ pub struct ParseTopLevelResult {
     pub top_level_scope_id: ScopeId,
 }
 
-pub fn parse_top_level(parser: &mut Parser) -> TsResult<ParseTopLevelResult> {
+pub fn parse_top_level(parser: &mut Parser) -> SyntaxResult<ParseTopLevelResult> {
     let top_level_scope_id = parser.create_global_scope();
     let mut body: Vec<NodeId> = Vec::new();
     let syntax = ParsePatternSyntax {

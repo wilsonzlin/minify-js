@@ -97,7 +97,7 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
             arguments,
         } => json!({
             "$t": "CallExpr",
-            "optional_chaining": "optional_chaining",
+            "optional_chaining": optional_chaining,
             "parenthesised": parenthesised,
             "callee": visit_node(m, *callee),
             "arguments": arguments.iter().map(|n| visit_node(m, *n)).collect::<Vec<_>>(),
@@ -120,7 +120,7 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
             member,
         } => json!({
             "$t": "ComputedMemberExpr",
-            "optional_chaining": "optional_chaining",
+            "optional_chaining": optional_chaining,
             "object": visit_node(m, *object),
             "member": visit_node(m, *member),
         }),

@@ -9,7 +9,7 @@ use crate::char::{
     CharFilter, DIGIT, DIGIT_BIN, DIGIT_HEX, DIGIT_OCT, ID_CONTINUE,
     ID_CONTINUE_OR_PARENTHESIS_CLOSE_OR_BRACKET_CLOSE, ID_START_CHARSTR, WHITESPACE,
 };
-use crate::error::{SyntaxError, SyntaxErrorType, TsResult};
+use crate::error::{SyntaxError, SyntaxErrorType, SyntaxResult};
 use crate::source::{Source, SourceRange};
 use crate::token::{Token, TokenType};
 
@@ -103,7 +103,7 @@ impl Lexer {
             .unwrap_or(&b'\xFF')
     }
 
-    fn peek(&self, n: usize) -> TsResult<u8> {
+    fn peek(&self, n: usize) -> SyntaxResult<u8> {
         self.peek_or_eof(n)
             .ok_or_else(|| self.error(SyntaxErrorType::UnexpectedEnd))
     }
@@ -112,7 +112,7 @@ impl Lexer {
         self.source.code().get(self.next + n).map(|&c| c)
     }
 
-    fn consume_next_char(&mut self) -> TsResult<(SourceRange, u8)> {
+    fn consume_next_char(&mut self) -> SyntaxResult<(SourceRange, u8)> {
         if self.at_end() {
             Err(self.error(SyntaxErrorType::UnexpectedEnd))
         } else {
@@ -143,7 +143,7 @@ impl Lexer {
         self.next = checkpoint.next;
     }
 
-    fn n(&self, n: usize) -> TsResult<Match> {
+    fn n(&self, n: usize) -> SyntaxResult<Match> {
         if self.next + n > self.end() {
             return Err(self.error(SyntaxErrorType::UnexpectedEnd));
         };
@@ -156,7 +156,7 @@ impl Lexer {
         }
     }
 
-    fn through_char(&self, c: u8) -> TsResult<Match> {
+    fn through_char(&self, c: u8) -> SyntaxResult<Match> {
         memchr(c, &self.source.code()[self.next..])
             .map(|pos| Match { len: pos + 1 })
             .ok_or_else(|| self.error(SyntaxErrorType::UnexpectedEnd))
@@ -182,7 +182,7 @@ impl Lexer {
         Match { len }
     }
 
-    fn aho_corasick(&self, ac: &AhoCorasick) -> TsResult<AhoCorasickMatch> {
+    fn aho_corasick(&self, ac: &AhoCorasick) -> SyntaxResult<AhoCorasickMatch> {
         ac.find(&self.source.code()[self.next..])
             .map(|m| AhoCorasickMatch {
                 id: m.pattern(),
@@ -389,14 +389,14 @@ lazy_static! {
     static ref COMMENT_END: AhoCorasick = AhoCorasick::new(&[b"*/"]);
 }
 
-fn lex_multiple_comment(lexer: &mut Lexer) -> TsResult<()> {
+fn lex_multiple_comment(lexer: &mut Lexer) -> SyntaxResult<()> {
     // Consume `/*`.
     lexer.skip_expect(2);
     lexer.consume(lexer.aho_corasick(&COMMENT_END)?.mat);
     Ok(())
 }
 
-fn lex_single_comment(lexer: &mut Lexer) -> TsResult<()> {
+fn lex_single_comment(lexer: &mut Lexer) -> SyntaxResult<()> {
     // Consume `//`.
     lexer.skip_expect(2);
     // WARNING: Does not consider other line terminators allowed by spec.
@@ -404,7 +404,7 @@ fn lex_single_comment(lexer: &mut Lexer) -> TsResult<()> {
     Ok(())
 }
 
-fn lex_identifier(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsResult<Token> {
+fn lex_identifier(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> SyntaxResult<Token> {
     let cp = lexer.checkpoint();
     // Consume starter.
     lexer.skip_expect(1);
@@ -416,7 +416,7 @@ fn lex_identifier(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsRes
     ))
 }
 
-fn lex_number(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsResult<Token> {
+fn lex_number(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> SyntaxResult<Token> {
     let cp = lexer.checkpoint();
     // TODO
     lexer.consume(lexer.while_chars(&DIGIT));
@@ -441,7 +441,7 @@ fn lex_number(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsResult<
     ))
 }
 
-fn lex_number_bin(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsResult<Token> {
+fn lex_number_bin(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> SyntaxResult<Token> {
     let cp = lexer.checkpoint();
     lexer.skip_expect(2);
     lexer.consume(lexer.while_chars(&DIGIT_BIN));
@@ -452,7 +452,7 @@ fn lex_number_bin(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsRes
     ))
 }
 
-fn lex_number_hex(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsResult<Token> {
+fn lex_number_hex(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> SyntaxResult<Token> {
     let cp = lexer.checkpoint();
     lexer.skip_expect(2);
     lexer.consume(lexer.while_chars(&DIGIT_HEX));
@@ -463,7 +463,7 @@ fn lex_number_hex(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsRes
     ))
 }
 
-fn lex_number_oct(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsResult<Token> {
+fn lex_number_oct(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> SyntaxResult<Token> {
     let cp = lexer.checkpoint();
     lexer.skip_expect(2);
     lexer.consume(lexer.while_chars(&DIGIT_OCT));
@@ -475,7 +475,7 @@ fn lex_number_oct(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsRes
 }
 
 // TODO Validate regex.
-fn lex_regex(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsResult<Token> {
+fn lex_regex(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> SyntaxResult<Token> {
     let cp = lexer.checkpoint();
     // Consume slash.
     lexer.consume(lexer.n(1)?);
@@ -519,7 +519,7 @@ fn lex_regex(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsResult<T
 }
 
 // TODO Validate string.
-fn lex_string(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsResult<Token> {
+fn lex_string(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> SyntaxResult<Token> {
     let cp = lexer.checkpoint();
     let quote = lexer.peek(0)?;
     lexer.skip_expect(1);
@@ -550,7 +550,7 @@ fn lex_string(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsResult<
 pub fn lex_template_string_continue(
     lexer: &mut Lexer,
     preceded_by_line_terminator: bool,
-) -> TsResult<Token> {
+) -> SyntaxResult<Token> {
     let cp = lexer.checkpoint();
     let mut loc: Option<SourceRange> = None;
     let mut ended = false;
@@ -590,13 +590,13 @@ pub fn lex_template_string_continue(
 }
 
 // TODO Validate template.
-fn lex_template(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> TsResult<Token> {
+fn lex_template(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> SyntaxResult<Token> {
     // Consume backtick.
     lexer.skip_expect(1);
     lex_template_string_continue(lexer, preceded_by_line_terminator)
 }
 
-pub fn lex_next(lexer: &mut Lexer, mode: LexMode) -> TsResult<Token> {
+pub fn lex_next(lexer: &mut Lexer, mode: LexMode) -> SyntaxResult<Token> {
     let mut preceded_by_line_terminator = false;
     loop {
         let ws = lexer.while_chars(&WHITESPACE);

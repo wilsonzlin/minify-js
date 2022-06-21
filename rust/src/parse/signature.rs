@@ -1,5 +1,5 @@
 use crate::ast::{NodeId, Syntax};
-use crate::error::TsResult;
+use crate::error::SyntaxResult;
 use crate::parse::expr::parse_expr_until_either;
 use crate::parse::parser::Parser;
 use crate::parse::pattern::parse_pattern;
@@ -13,7 +13,7 @@ pub fn parse_signature_function(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let start_pos = parser.checkpoint();
 
     let mut parameters = Vec::new();

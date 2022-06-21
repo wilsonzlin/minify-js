@@ -93,4 +93,4 @@ impl PartialEq for SyntaxError {
 
 impl Eq for SyntaxError {}
 
-pub type TsResult<T> = Result<T, SyntaxError>;
+pub type SyntaxResult<T> = Result<T, SyntaxError>;

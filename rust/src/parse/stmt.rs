@@ -2,7 +2,7 @@ use crate::ast::{
     ExportNames, ForInOfStmtHeaderLhs, ForStmtHeader, ForThreeInit, ImportNames,
     ImportOrExportName, NodeId, Syntax,
 };
-use crate::error::{SyntaxErrorType, TsResult};
+use crate::error::{SyntaxErrorType, SyntaxResult};
 use crate::parse::decl::{parse_decl_function, parse_decl_var};
 use crate::parse::expr::parse_expr;
 use crate::parse::literal::parse_and_normalise_literal_string;
@@ -16,7 +16,7 @@ use super::decl::{parse_decl_class, VarDeclParseMode};
 use super::expr::{parse_expr_with_asi, Asi};
 use super::pattern::{is_valid_pattern_identifier, ParsePatternSyntax};
 
-fn parse_import_or_export_name(parser: &mut Parser) -> TsResult<ImportOrExportName> {
+fn parse_import_or_export_name(parser: &mut Parser) -> SyntaxResult<ImportOrExportName> {
     Ok(
         if parser.consume_if(TokenType::KeywordDefault)?.is_match() {
             ImportOrExportName::Default
@@ -30,7 +30,7 @@ pub fn parse_stmt(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     match parser.peek()?.typ() {
         TokenType::BraceOpen => parse_stmt_block(scope, parser, syntax),
         TokenType::KeywordBreak => parse_stmt_break(scope, parser, syntax),
@@ -70,7 +70,7 @@ pub fn parse_stmt(
     }
 }
 
-pub fn parse_stmt_empty(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId> {
+pub fn parse_stmt_empty(scope: ScopeId, parser: &mut Parser) -> SyntaxResult<NodeId> {
     let loc = parser.require(TokenType::Semicolon)?.loc_take();
     Ok(parser.create_node(scope, loc, Syntax::EmptyStmt {}))
 }
@@ -79,7 +79,7 @@ pub fn parse_stmt_block(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let start = parser.require(TokenType::BraceOpen)?;
     let block_scope = parser.create_child_scope(scope, ScopeType::Block);
     let mut body: Vec<NodeId> = Vec::new();
@@ -99,7 +99,7 @@ pub fn parse_stmt_var(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let declaration = parse_decl_var(scope, parser, VarDeclParseMode::Asi, syntax)?;
     Ok(parser.create_node(
         scope,
@@ -117,7 +117,7 @@ fn parse_stmt_break_or_continue(
     parser: &mut Parser,
     t: TokenType,
     syntax: &ParsePatternSyntax,
-) -> TsResult<BreakOrContinue> {
+) -> SyntaxResult<BreakOrContinue> {
     let mut loc = parser.require(t)?.loc_take();
     let next = parser.peek()?;
     let label =
@@ -141,7 +141,7 @@ pub fn parse_stmt_break(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let stmt = parse_stmt_break_or_continue(parser, TokenType::KeywordBreak, syntax)?;
     Ok(parser.create_node(scope, stmt.loc, Syntax::BreakStmt { label: stmt.label }))
 }
@@ -150,12 +150,12 @@ pub fn parse_stmt_continue(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let stmt = parse_stmt_break_or_continue(parser, TokenType::KeywordContinue, syntax)?;
     Ok(parser.create_node(scope, stmt.loc, Syntax::ContinueStmt { label: stmt.label }))
 }
 
-pub fn parse_stmt_debugger(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId> {
+pub fn parse_stmt_debugger(scope: ScopeId, parser: &mut Parser) -> SyntaxResult<NodeId> {
     let loc = parser.require(TokenType::KeywordDebugger)?.loc_take();
     Ok(parser.create_node(scope, loc, Syntax::DebuggerStmt {}))
 }
@@ -164,7 +164,7 @@ pub fn parse_stmt_export(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let start = parser.require(TokenType::KeywordExport)?;
     let cp = parser.checkpoint();
     let t = parser.next()?;
@@ -241,7 +241,7 @@ pub fn parse_stmt_expression(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let mut asi = Asi::can();
     let expression = parse_expr_with_asi(scope, parser, TokenType::Semicolon, &mut asi, syntax)?;
     if !asi.did_end_with_asi {
@@ -258,7 +258,7 @@ pub fn parse_stmt_for(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let for_scope = parser.create_child_scope(scope, ScopeType::Block);
 
     let start = parser.require(TokenType::KeywordFor)?;
@@ -386,7 +386,7 @@ pub fn parse_stmt_if(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let start = parser.require(TokenType::KeywordIf)?;
     parser.require(TokenType::ParenthesisOpen)?;
     let test = parse_expr(scope, parser, TokenType::ParenthesisClose, syntax)?;
@@ -413,7 +413,7 @@ pub fn parse_stmt_import_or_expr_import(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let cp = parser.checkpoint();
     let start = parser.require(TokenType::KeywordImport)?;
     if parser.consume_if(TokenType::ParenthesisOpen)?.is_match() {
@@ -474,7 +474,7 @@ pub fn parse_stmt_return(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let start = parser.require(TokenType::KeywordReturn)?;
     let mut loc = start.loc().clone();
     let value = if parser.peek()?.preceded_by_line_terminator() {
@@ -495,7 +495,7 @@ pub fn parse_stmt_throw(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let start = parser.require(TokenType::KeywordThrow)?;
     if parser.peek()?.preceded_by_line_terminator() {
         // Illegal under Automatic Semicolon Insertion rules.
@@ -514,7 +514,7 @@ pub fn parse_stmt_try(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let start = parser.require(TokenType::KeywordTry)?;
     let mut loc = start.loc().clone();
     let wrapped = parse_stmt_block(scope, parser, syntax)?;
@@ -567,7 +567,7 @@ pub fn parse_stmt_while(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let start = parser.require(TokenType::KeywordWhile)?;
     parser.require(TokenType::ParenthesisOpen)?;
     let condition = parse_expr(scope, parser, TokenType::ParenthesisClose, syntax)?;
@@ -584,7 +584,7 @@ pub fn parse_stmt_do_while(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let start = parser.require(TokenType::KeywordDo)?;
     let body = parse_stmt(scope, parser, syntax)?;
     parser.require(TokenType::KeywordWhile)?;
@@ -603,7 +603,7 @@ pub fn parse_stmt_switch(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let start = parser.require(TokenType::KeywordSwitch)?;
     parser.require(TokenType::ParenthesisOpen)?;
     let test = parse_expr(scope, parser, TokenType::ParenthesisClose, syntax)?;

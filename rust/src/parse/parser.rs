@@ -1,7 +1,7 @@
 use std::ops::{Index, IndexMut};
 
 use crate::ast::{NodeData, NodeId, NodeMap, Syntax};
-use crate::error::{SyntaxError, SyntaxErrorType, TsResult};
+use crate::error::{SyntaxError, SyntaxErrorType, SyntaxResult};
 use crate::lex::{lex_next, LexMode, Lexer, LexerCheckpoint};
 use crate::source::SourceRange;
 use crate::symbol::{ScopeData, ScopeId, ScopeMap, ScopeType};
@@ -40,11 +40,11 @@ impl MaybeToken {
         SyntaxError::from_loc(&self.range, err, Some(self.typ))
     }
 
-    pub fn and_then<R, F: FnOnce() -> TsResult<R>>(self, f: F) -> TsResult<Option<R>> {
+    pub fn and_then<R, F: FnOnce() -> SyntaxResult<R>>(self, f: F) -> SyntaxResult<Option<R>> {
         Ok(if self.matched { Some(f()?) } else { None })
     }
 
-    pub fn or_else<R, F: FnOnce() -> TsResult<R>>(self, f: F) -> TsResult<Option<R>> {
+    pub fn or_else<R, F: FnOnce() -> SyntaxResult<R>>(self, f: F) -> SyntaxResult<Option<R>> {
         Ok(if self.matched { None } else { Some(f()?) })
     }
 }
@@ -150,7 +150,11 @@ impl Parser {
         self.buffered = None;
     }
 
-    fn forward<K: FnOnce(&Token) -> bool>(&mut self, mode: LexMode, keep: K) -> TsResult<Token> {
+    fn forward<K: FnOnce(&Token) -> bool>(
+        &mut self,
+        mode: LexMode,
+        keep: K,
+    ) -> SyntaxResult<Token> {
         match self.buffered.as_ref() {
             Some(b) if b.lex_mode == mode => Ok(if keep(&b.token) {
                 self.lexer.apply_checkpoint(b.after_checkpoint);
@@ -178,19 +182,19 @@ impl Parser {
         }
     }
 
-    pub fn next_with_mode(&mut self, mode: LexMode) -> TsResult<Token> {
+    pub fn next_with_mode(&mut self, mode: LexMode) -> SyntaxResult<Token> {
         self.forward(mode, |_| true)
     }
 
-    pub fn next(&mut self) -> TsResult<Token> {
+    pub fn next(&mut self) -> SyntaxResult<Token> {
         self.next_with_mode(LexMode::Standard)
     }
 
-    pub fn peek_with_mode(&mut self, mode: LexMode) -> TsResult<Token> {
+    pub fn peek_with_mode(&mut self, mode: LexMode) -> SyntaxResult<Token> {
         self.forward(mode, |_| false)
     }
 
-    pub fn peek(&mut self) -> TsResult<Token> {
+    pub fn peek(&mut self) -> SyntaxResult<Token> {
         self.peek_with_mode(LexMode::Standard)
     }
 
@@ -199,7 +203,7 @@ impl Parser {
         self.lexer.apply_checkpoint(b.after_checkpoint);
     }
 
-    pub fn maybe_with_mode(&mut self, typ: TokenType, mode: LexMode) -> TsResult<MaybeToken> {
+    pub fn maybe_with_mode(&mut self, typ: TokenType, mode: LexMode) -> SyntaxResult<MaybeToken> {
         let t = self.forward(mode, |t| t.typ() == typ)?;
         Ok(MaybeToken {
             typ,
@@ -208,11 +212,11 @@ impl Parser {
         })
     }
 
-    pub fn consume_if(&mut self, typ: TokenType) -> TsResult<MaybeToken> {
+    pub fn consume_if(&mut self, typ: TokenType) -> SyntaxResult<MaybeToken> {
         self.maybe_with_mode(typ, LexMode::Standard)
     }
 
-    pub fn require_with_mode(&mut self, typ: TokenType, mode: LexMode) -> TsResult<Token> {
+    pub fn require_with_mode(&mut self, typ: TokenType, mode: LexMode) -> SyntaxResult<Token> {
         let t = self.next_with_mode(mode)?;
         if t.typ() != typ {
             Err(t.error(SyntaxErrorType::RequiredTokenNotFound(typ)))
@@ -225,7 +229,7 @@ impl Parser {
         &mut self,
         pred: P,
         expected: &'static str,
-    ) -> TsResult<Token> {
+    ) -> SyntaxResult<Token> {
         let t = self.next_with_mode(LexMode::Standard)?;
         if !pred(t.typ()) {
             Err(t.error(SyntaxErrorType::ExpectedSyntax(expected)))
@@ -234,7 +238,7 @@ impl Parser {
         }
     }
 
-    pub fn require(&mut self, typ: TokenType) -> TsResult<Token> {
+    pub fn require(&mut self, typ: TokenType) -> SyntaxResult<Token> {
         self.require_with_mode(typ, LexMode::Standard)
     }
 }

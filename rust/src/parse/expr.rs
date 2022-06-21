@@ -2,7 +2,7 @@ use crate::ast::{
     ArrayElement, ArrayPatternElement, ClassOrObjectMemberKey, ClassOrObjectMemberValue,
     LiteralTemplatePart, NodeId, ObjectMemberType, Syntax,
 };
-use crate::error::{SyntaxErrorType, TsResult};
+use crate::error::{SyntaxErrorType, SyntaxResult};
 use crate::lex::{lex_template_string_continue, LexMode, KEYWORDS_MAPPING};
 use crate::operator::{Associativity, OperatorName, OPERATORS};
 use crate::parse::literal::{
@@ -45,7 +45,7 @@ pub fn parse_call_args(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<Vec<NodeId>> {
+) -> SyntaxResult<Vec<NodeId>> {
     let mut args = Vec::<NodeId>::new();
     loop {
         if parser.peek()?.typ() == TokenType::ParenthesisClose {
@@ -76,7 +76,7 @@ pub fn parse_expr(
     parser: &mut Parser,
     terminator: TokenType,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     parse_expr_with_min_prec(
         scope,
         parser,
@@ -95,7 +95,7 @@ pub fn parse_expr_with_asi(
     terminator: TokenType,
     asi: &mut Asi,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     parse_expr_with_min_prec(
         scope,
         parser,
@@ -114,7 +114,7 @@ pub fn parse_expr_until_either(
     terminator_a: TokenType,
     terminator_b: TokenType,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     parse_expr_with_min_prec(
         scope,
         parser,
@@ -134,7 +134,7 @@ pub fn parse_expr_until_either_with_asi(
     terminator_b: TokenType,
     asi: &mut Asi,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     parse_expr_with_min_prec(
         scope,
         parser,
@@ -152,7 +152,7 @@ pub fn parse_grouping(
     parser: &mut Parser,
     asi: &mut Asi,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     parser.require(TokenType::ParenthesisOpen)?;
     let expr = parse_expr_with_min_prec(
         scope,
@@ -172,7 +172,7 @@ pub fn parse_expr_array(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let loc_start = parser.require(TokenType::BracketOpen)?.loc_take();
     let mut elements = Vec::<ArrayElement>::new();
     loop {
@@ -213,7 +213,7 @@ pub fn parse_expr_object(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let loc_start = parser.require(TokenType::BraceOpen)?.loc_take();
     let mut members = Vec::<NodeId>::new();
     loop {
@@ -285,7 +285,7 @@ pub fn parse_expr_arrow_function_or_grouping(
     terminator_b: TokenType,
     asi: &mut Asi,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     // Try and parse as arrow function signature first.
     // If we fail, backtrack and parse as grouping instead.
     // After we see `=>`, we assume it's definitely an arrow function and do not backtrack.
@@ -328,7 +328,7 @@ pub fn parse_expr_arrow_function_or_grouping(
     ))
 }
 
-pub fn parse_expr_import(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId> {
+pub fn parse_expr_import(scope: ScopeId, parser: &mut Parser) -> SyntaxResult<NodeId> {
     let start = parser.require(TokenType::KeywordImport)?;
     parser.require(TokenType::ParenthesisOpen)?;
     // TODO Non-literal-string imports.
@@ -346,7 +346,7 @@ pub fn parse_expr_function(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let fn_scope = parser.create_child_scope(scope, ScopeType::Closure);
     let start = parser.require(TokenType::KeywordFunction)?.loc().clone();
     let generator = parser.consume_if(TokenType::Asterisk)?.is_match();
@@ -384,7 +384,7 @@ fn parse_expr_operand(
     terminator_b: TokenType,
     asi: &mut Asi,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let cp = parser.checkpoint();
     let t = parser.next_with_mode(LexMode::SlashIsRegex)?;
     let operand = if let Some(operator) = UNARY_OPERATOR_MAPPING.get(&t.typ()) {
@@ -585,7 +585,7 @@ fn transform_literal_expr_to_destructuring_pattern(
     parser: &Parser,
     node: NodeId,
     updates: &mut NodeUpdates,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let loc = parser[node].loc();
     match parser[node].stx() {
         Syntax::LiteralArrayExpr { elements } => {
@@ -743,7 +743,7 @@ fn convert_assignment_lhs_to_target(
     parser: &mut Parser,
     lhs: NodeId,
     operator_name: OperatorName,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     match parser[lhs].stx() {
         e @ (Syntax::LiteralArrayExpr { .. }
         | Syntax::LiteralObjectExpr { .. }
@@ -786,7 +786,7 @@ pub fn parse_expr_with_min_prec(
     parenthesised: bool,
     asi: &mut Asi,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let mut left = parse_expr_operand(scope, parser, terminator_a, terminator_b, asi, syntax)?;
 
     loop {

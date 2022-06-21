@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
 
 use crate::ast::NodeId;
-use crate::error::{SyntaxError, SyntaxErrorType, TsResult};
+use crate::error::{SyntaxError, SyntaxErrorType, SyntaxResult};
 use crate::source::SourceRange;
 
 pub type Identifier = SourceRange;
@@ -63,7 +63,7 @@ impl ScopeData {
         }
     }
 
-    pub fn add_symbol(&mut self, identifier: Identifier, symbol: Symbol) -> TsResult<()> {
+    pub fn add_symbol(&mut self, identifier: Identifier, symbol: Symbol) -> SyntaxResult<()> {
         if self.symbols.insert(identifier.clone(), symbol).is_some() {
             // TODO Investigate raising an error; however, many production codebases redeclare `var`.
             Ok(())
@@ -73,7 +73,7 @@ impl ScopeData {
         }
     }
 
-    pub fn add_block_symbol(&mut self, identifier: Identifier, symbol: Symbol) -> TsResult<()> {
+    pub fn add_block_symbol(&mut self, identifier: Identifier, symbol: Symbol) -> SyntaxResult<()> {
         if self.typ != ScopeType::Global {
             self.add_symbol(identifier, symbol)?;
         };

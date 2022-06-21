@@ -1,5 +1,5 @@
 use crate::ast::{ArrayPatternElement, ClassOrObjectMemberKey, NodeId, Syntax};
-use crate::error::{SyntaxErrorType, TsResult};
+use crate::error::{SyntaxErrorType, SyntaxResult};
 use crate::parse::expr::parse_expr_until_either;
 use crate::parse::literal::parse_class_or_object_member_key;
 use crate::parse::parser::Parser;
@@ -39,7 +39,7 @@ fn parse_pattern_identifier(
     parser: &mut Parser,
     action: ParsePatternAction,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     if !is_valid_pattern_identifier(parser.peek()?.typ(), syntax) {
         return Err(parser
             .peek()?
@@ -73,7 +73,7 @@ pub fn parse_pattern(
     parser: &mut Parser,
     action: ParsePatternAction,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let checkpoint = parser.checkpoint();
     let t = parser.next()?;
     Ok(match t.typ() {

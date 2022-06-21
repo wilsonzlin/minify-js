@@ -1,5 +1,5 @@
 use crate::ast::{ClassMember, NodeId, Syntax, VarDeclMode, VariableDeclarator};
-use crate::error::{SyntaxErrorType, TsResult};
+use crate::error::{SyntaxErrorType, SyntaxResult};
 use crate::parse::parser::Parser;
 use crate::parse::pattern::parse_pattern;
 use crate::parse::signature::parse_signature_function;
@@ -24,7 +24,7 @@ pub fn parse_decl_var(
     parser: &mut Parser,
     parse_mode: VarDeclParseMode,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let t = parser.next()?;
     let mode = match t.typ() {
         TokenType::KeywordLet => VarDeclMode::Let,
@@ -88,7 +88,7 @@ pub fn parse_decl_function(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let fn_scope = parser.create_child_scope(scope, ScopeType::Closure);
     let start = parser.require(TokenType::KeywordFunction)?.loc().clone();
     let generator = parser.consume_if(TokenType::Asterisk)?.is_match();
@@ -124,7 +124,7 @@ pub fn parse_decl_class(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
-) -> TsResult<NodeId> {
+) -> SyntaxResult<NodeId> {
     let start = parser.require(TokenType::KeywordClass)?.loc().clone();
     let name = parser.require(TokenType::Identifier)?.loc().clone();
     let name_node = parser.create_node(

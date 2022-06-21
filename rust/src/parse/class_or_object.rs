@@ -1,6 +1,6 @@
 use crate::{
     ast::{ClassOrObjectMemberKey, ClassOrObjectMemberValue},
-    error::TsResult,
+    error::SyntaxResult,
     lex::KEYWORDS_MAPPING,
     symbol::{ScopeId, ScopeType},
     token::TokenType,
@@ -31,7 +31,7 @@ pub fn parse_class_or_object_member(
     statement_delimiter: TokenType,
     property_initialiser_asi: &mut Asi,
     syntax: &ParsePatternSyntax,
-) -> TsResult<ParseClassOrObjectMemberResult> {
+) -> SyntaxResult<ParseClassOrObjectMemberResult> {
     let checkpoint = parser.checkpoint();
     let mut is_getter = false;
     let mut is_setter = false;
