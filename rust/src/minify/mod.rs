@@ -54,7 +54,7 @@ fn visit_class_or_object_key(
     key: &ClassOrObjectMemberKey,
 ) -> () {
     match key {
-        ClassOrObjectMemberKey::Direct(e) => {}
+        ClassOrObjectMemberKey::Direct(_) => {}
         ClassOrObjectMemberKey::Computed(e) => visit_node(s, m, updates, *e),
     };
 }
@@ -431,7 +431,9 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
             visit_node(s, m, updates, *condition);
             visit_node(s, m, updates, *body);
         }
-        Syntax::YieldExpr { argument, delegate } => todo!(),
+        Syntax::YieldExpr { argument, .. } => {
+            visit_node(s, m, updates, *argument);
+        }
         Syntax::ObjectMember { typ } => {
             match typ {
                 ObjectMemberType::Valued { key, value } => {
@@ -464,7 +466,9 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
                         );
                     };
                 }
-                ObjectMemberType::Rest { value } => todo!(),
+                ObjectMemberType::Rest { value } => {
+                    visit_node(s, m, updates, *value);
+                }
             };
         }
         Syntax::MemberExpr { left, .. } => {

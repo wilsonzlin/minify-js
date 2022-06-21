@@ -35,6 +35,7 @@ impl CharFilter {
         }
     }
 
+    #[allow(dead_code)]
     pub fn invert(&mut self) -> () {
         for i in 0..256 {
             self.table[i] = !self.table[i];
@@ -45,6 +46,7 @@ impl CharFilter {
         unsafe { *self.table.get_unchecked(c as usize) }
     }
 
+    #[allow(dead_code)]
     pub fn iter(&self) -> impl Iterator<Item = u8> + '_ {
         self.table
             .iter()

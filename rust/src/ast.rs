@@ -43,6 +43,7 @@ impl NodeData {
         &mut self.stx
     }
 
+    #[allow(dead_code)]
     pub fn stx_take(self) -> Syntax {
         self.stx
     }
@@ -93,10 +94,6 @@ impl NodeMap {
 
     pub fn push(&mut self, n: NodeData) -> () {
         self.nodes.push(n);
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = &NodeData> {
-        self.nodes.iter()
     }
 }
 

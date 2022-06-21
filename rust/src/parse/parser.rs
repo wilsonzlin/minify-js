@@ -35,6 +35,7 @@ impl MaybeToken {
         }
     }
 
+    #[allow(dead_code)]
     pub fn error(&self, err: SyntaxErrorType) -> SyntaxError {
         debug_assert!(!self.matched);
         SyntaxError::from_loc(&self.range, err, Some(self.typ))
@@ -42,10 +43,6 @@ impl MaybeToken {
 
     pub fn and_then<R, F: FnOnce() -> SyntaxResult<R>>(self, f: F) -> SyntaxResult<Option<R>> {
         Ok(if self.matched { Some(f()?) } else { None })
-    }
-
-    pub fn or_else<R, F: FnOnce() -> SyntaxResult<R>>(self, f: F) -> SyntaxResult<Option<R>> {
-        Ok(if self.matched { None } else { Some(f()?) })
     }
 }
 
@@ -104,10 +101,6 @@ impl Parser {
 
     pub fn node_map_mut(&mut self) -> &mut NodeMap {
         &mut self.node_map
-    }
-
-    pub fn scope_map_mut(&mut self) -> &mut ScopeMap {
-        &mut self.scope_map
     }
 
     pub fn create_global_scope(&mut self) -> ScopeId {

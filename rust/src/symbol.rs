@@ -10,6 +10,7 @@ pub type Identifier = SourceRange;
 #[derive(Clone, Debug)]
 pub struct Symbol {
     // This should refer to an ObjectPatternProperty if shorthand property, FunctionName if function name, or IdentifierPattern otherwise.
+    #[allow(dead_code)]
     declarator_pattern: NodeId,
     // Set to 0 initially, before minification pass. WARNING: 0 is still a valid value, so do not use before setting.
     minified_name_id: usize,
@@ -109,20 +110,12 @@ impl ScopeData {
     pub fn parent(&self) -> Option<ScopeId> {
         self.parent
     }
-
-    pub fn typ(&self) -> ScopeType {
-        self.typ
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScopeId(usize);
 
 impl ScopeId {
-    pub fn new(id: usize) -> ScopeId {
-        ScopeId(id)
-    }
-
     pub fn id(&self) -> usize {
         self.0
     }

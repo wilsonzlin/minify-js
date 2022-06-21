@@ -6,8 +6,7 @@ use lazy_static::lazy_static;
 use memchr::{memchr, memchr2, memchr3};
 
 use crate::char::{
-    CharFilter, DIGIT, DIGIT_BIN, DIGIT_HEX, DIGIT_OCT, ID_CONTINUE,
-    ID_CONTINUE_OR_PARENTHESIS_CLOSE_OR_BRACKET_CLOSE, ID_START_CHARSTR, WHITESPACE,
+    CharFilter, DIGIT, DIGIT_BIN, DIGIT_HEX, DIGIT_OCT, ID_CONTINUE, ID_START_CHARSTR, WHITESPACE,
 };
 use crate::error::{SyntaxError, SyntaxErrorType, SyntaxResult};
 use crate::source::{Source, SourceRange};
@@ -94,15 +93,6 @@ impl Lexer {
         self.next >= self.end()
     }
 
-    fn prev_char(&self) -> u8 {
-        // 0xFF is not a valid byte in any valid UTF-8 byte sequence.
-        *self
-            .source
-            .code()
-            .get(self.next.wrapping_sub(1))
-            .unwrap_or(&b'\xFF')
-    }
-
     fn peek(&self, n: usize) -> SyntaxResult<u8> {
         self.peek_or_eof(n)
             .ok_or_else(|| self.error(SyntaxErrorType::UnexpectedEnd))
@@ -110,21 +100,6 @@ impl Lexer {
 
     fn peek_or_eof(&self, n: usize) -> Option<u8> {
         self.source.code().get(self.next + n).map(|&c| c)
-    }
-
-    fn consume_next_char(&mut self) -> SyntaxResult<(SourceRange, u8)> {
-        if self.at_end() {
-            Err(self.error(SyntaxErrorType::UnexpectedEnd))
-        } else {
-            let c = self.source.code()[self.next];
-            let r = SourceRange {
-                source: self.source.clone(),
-                start: self.next,
-                end: self.next + 1,
-            };
-            self.next += 1;
-            Ok((r, c))
-        }
     }
 
     pub fn checkpoint(&self) -> LexerCheckpoint {
@@ -162,6 +137,7 @@ impl Lexer {
             .ok_or_else(|| self.error(SyntaxErrorType::UnexpectedEnd))
     }
 
+    #[allow(dead_code)]
     fn while_not_2_chars(&self, a: u8, b: u8) -> Match {
         Match {
             len: memchr2(a, b, &self.source.code()[self.next..]).unwrap_or(self.remaining()),
@@ -552,9 +528,8 @@ pub fn lex_template_string_continue(
     preceded_by_line_terminator: bool,
 ) -> SyntaxResult<Token> {
     let cp = lexer.checkpoint();
-    let mut loc: Option<SourceRange> = None;
     let mut ended = false;
-    loop {
+    let loc = loop {
         lexer.consume(lexer.while_not_3_chars(b'\\', b'`', b'$'));
         match lexer.peek(0)? {
             b'\\' => {
@@ -562,22 +537,22 @@ pub fn lex_template_string_continue(
             }
             b'`' => {
                 ended = true;
-                loc = Some(lexer.since_checkpoint(cp));
+                let loc = Some(lexer.since_checkpoint(cp));
                 lexer.skip_expect(1);
-                break;
+                break loc;
             }
             b'$' => {
                 if lexer.peek(1)? == b'{' {
-                    loc = Some(lexer.since_checkpoint(cp));
+                    let loc = Some(lexer.since_checkpoint(cp));
                     lexer.skip_expect(2);
-                    break;
+                    break loc;
                 } else {
                     lexer.skip_expect(1);
                 }
             }
             _ => unreachable!(),
         };
-    }
+    };
     Ok(Token::new(
         loc.unwrap(),
         if ended {
