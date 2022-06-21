@@ -61,3 +61,4 @@ assert_eq!(out.get_ref().as_slice(), b"let x=1;");
   - Replace `const` with `let`.
   - Hoist `let` and `const`.
   - Unwrapping blocks.
+  - Unwrapping paretheses, altering expressions as necessary.

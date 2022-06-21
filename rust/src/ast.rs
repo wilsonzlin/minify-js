@@ -443,6 +443,7 @@ pub enum Syntax {
     },
     LabelStmt {
         name: SourceRange,
+        statement: Statement,
     },
     ReturnStmt {
         value: Option<Expression>,

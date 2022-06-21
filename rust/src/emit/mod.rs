@@ -204,6 +204,67 @@ pub fn emit_js<T: Write>(out: &mut T, m: &NodeMap, n: NodeId) -> io::Result<()> 
     out.flush()
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LeafNodeType {
+    EmptyStmt,
+    Other,
+    Block,
+}
+
+fn get_leaf_node_type(m: &NodeMap, n: NodeId) -> LeafNodeType {
+    match m[n].stx() {
+        Syntax::WhileStmt { body, .. } | Syntax::ForStmt { body, .. } => {
+            get_leaf_node_type(m, *body)
+        }
+        Syntax::LabelStmt { statement, .. } => get_leaf_node_type(m, *statement),
+        Syntax::IfStmt {
+            consequent,
+            alternate,
+            ..
+        } => match alternate {
+            Some(n) => get_leaf_node_type(m, *n),
+            None => get_leaf_node_type(m, *consequent),
+        },
+        Syntax::BlockStmt { .. } => LeafNodeType::Block,
+        Syntax::EmptyStmt {} => LeafNodeType::EmptyStmt,
+        _ => LeafNodeType::Other,
+    }
+}
+
+// It's important to use this function:
+// - Omit semicolons where possible.
+// - Insert semicolon after last statement if its leaf is a `if`, `for`, `while`, or `with` statement with an empty statement as its body e.g. `if (x) label: for (;;) while (x)` but not `if (x) for (;;) label: while (x) {}` or `if (x) for (;;) label: while (x) return`.
+fn emit_statements<T: Write>(out: &mut T, m: &NodeMap, statements: &[NodeId]) -> io::Result<()> {
+    for (i, n) in statements.iter().enumerate() {
+        if i > 0 {
+            out.write_all(b";")?;
+        };
+        emit_js(out, m, *n)?;
+    }
+    if let Some(n) = statements.last() {
+        if get_leaf_node_type(m, *n) == LeafNodeType::EmptyStmt {
+            out.write_all(b";")?;
+        }
+    }
+    Ok(())
+}
+
+/*
+For `do <stmt> while (...)` and `if <stmt> else (...)`, when does a semicolon need to be inserted after `<stmt>`?
+
+# Requires semicolon:
+- do a + b; while (a)
+- do return; while (a)
+- do label: return a + b; while (a)
+- do continue; while (a)
+- do for (;;) while (y) if (z); while (a)
+
+# Does not require semicolon, would cause malformed syntax:
+- do {} while (a)
+- do if (x) {} while (a)
+- do for (;;) while (y) if (z) {} while (a);
+*/
+
 fn emit_js_under_operator<T: Write>(
     out: &mut T,
     map: &NodeMap,
@@ -211,11 +272,7 @@ fn emit_js_under_operator<T: Write>(
     parent_operator_precedence: Option<u8>,
 ) -> io::Result<()> {
     match map[node_id].stx() {
-        Syntax::EmptyStmt {} => {
-            // It is often still required to output the semicolon e.g. `if (x); else if (y); else ;`.
-            // TODO Omit when possible.
-            out.write_all(b";")?;
-        }
+        Syntax::EmptyStmt {} => {}
         Syntax::LiteralBooleanExpr { .. }
         | Syntax::LiteralNumberExpr { .. }
         | Syntax::LiteralRegexExpr { .. }
@@ -260,8 +317,6 @@ fn emit_js_under_operator<T: Write>(
         }
         Syntax::VarStmt { declaration } => {
             emit_js(out, map, *declaration)?;
-            // TODO Omit semicolon if possible.
-            out.write_all(b";")?;
         }
         Syntax::IdentifierPattern { name } => {
             out.write_all(name.as_slice())?;
@@ -609,19 +664,22 @@ fn emit_js_under_operator<T: Write>(
         }
         Syntax::BlockStmt { body } => {
             out.write_all(b"{")?;
-            for n in body {
-                emit_js(out, map, *n)?;
-            }
+            emit_statements(out, map, &body)?;
             out.write_all(b"}")?;
         }
-        Syntax::BreakStmt { label } | Syntax::ContinueStmt { label } => {
+        Syntax::BreakStmt { label } => {
             out.write_all(b"break")?;
             if let Some(label) = label {
                 out.write_all(b" ")?;
                 out.write_all(label.as_slice())?;
             };
-            // TODO Omit semicolon if possible.
-            out.write_all(b";")?;
+        }
+        Syntax::ContinueStmt { label } => {
+            out.write_all(b"continue")?;
+            if let Some(label) = label {
+                out.write_all(b" ")?;
+                out.write_all(label.as_slice())?;
+            };
         }
         Syntax::DebuggerStmt {} => {
             out.write_all(b"debugger")?;
@@ -649,8 +707,6 @@ fn emit_js_under_operator<T: Write>(
         Syntax::ExportListStmt { names, from } => todo!(),
         Syntax::ExpressionStmt { expression } => {
             emit_js(out, map, *expression)?;
-            // TODO Omit semicolon if possible.
-            out.write_all(b";")?;
         }
         Syntax::IfStmt {
             test,
@@ -662,8 +718,17 @@ fn emit_js_under_operator<T: Write>(
             out.write_all(b")")?;
             emit_js(out, map, *consequent)?;
             if let Some(alternate) = alternate {
-                // TODO Trailing space not always necessary.
-                out.write_all(b"else ")?;
+                if get_leaf_node_type(map, *consequent) == LeafNodeType::Block {
+                    // Do nothing.
+                } else {
+                    out.write_all(b";")?;
+                };
+                out.write_all(b"else")?;
+                if let Syntax::BlockStmt { .. } = map[*alternate].stx() {
+                    // Do nothing.
+                } else {
+                    out.write_all(b" ")?;
+                };
                 emit_js(out, map, *alternate)?;
             };
         }
@@ -713,13 +778,12 @@ fn emit_js_under_operator<T: Write>(
             module,
         } => todo!(),
         Syntax::ReturnStmt { value } => {
-            // TODO Omit space if possible.
-            out.write_all(b"return ")?;
+            out.write_all(b"return")?;
             if let Some(value) = value {
+                // TODO Omit space if possible.
+                out.write_all(b" ")?;
                 emit_js(out, map, *value)?;
             };
-            // TODO Omit semicolon if possible.
-            out.write_all(b";")?;
         }
         Syntax::ThisExpr {} => {
             out.write_all(b"this")?;
@@ -727,13 +791,9 @@ fn emit_js_under_operator<T: Write>(
         Syntax::ThrowStmt { value } => {
             out.write_all(b"throw ")?;
             emit_js(out, map, *value)?;
-            // TODO Omit semicolon if possible.
-            out.write_all(b";")?;
         }
         Syntax::TopLevel { body } => {
-            for n in body {
-                emit_js(out, map, *n)?;
-            }
+            emit_statements(out, map, &body)?;
         }
         Syntax::TryStmt {
             wrapped,
@@ -757,9 +817,18 @@ fn emit_js_under_operator<T: Write>(
             emit_js(out, map, *body)?;
         }
         Syntax::DoWhileStmt { condition, body } => {
-            // TODO Omit space if possible.
-            out.write_all(b"do ")?;
+            out.write_all(b"do")?;
+            if let Syntax::BlockStmt { .. } = map[*body].stx() {
+                // Do nothing.
+            } else {
+                out.write_all(b" ")?;
+            };
             emit_js(out, map, *body)?;
+            if get_leaf_node_type(map, *body) == LeafNodeType::Block {
+                // Do nothing.
+            } else {
+                out.write_all(b";")?;
+            };
             out.write_all(b"while(")?;
             emit_js(out, map, *condition)?;
             out.write_all(b")")?;
@@ -768,7 +837,10 @@ fn emit_js_under_operator<T: Write>(
             out.write_all(b"switch(")?;
             emit_js(out, map, *test)?;
             out.write_all(b"){")?;
-            for b in branches {
+            for (i, b) in branches.iter().enumerate() {
+                if i > 0 {
+                    out.write_all(b";")?;
+                };
                 emit_js(out, map, *b)?;
             }
             out.write_all(b"}")?;
@@ -794,9 +866,7 @@ fn emit_js_under_operator<T: Write>(
                     out.write_all(b"default:")?;
                 }
             }
-            for stmt in body.iter() {
-                emit_js(out, map, *stmt)?;
-            }
+            emit_statements(out, map, &body)?;
         }
         Syntax::ObjectPatternProperty {
             key,
@@ -885,9 +955,10 @@ fn emit_js_under_operator<T: Write>(
                 out.write_all(b")")?;
             }
         }
-        Syntax::LabelStmt { name } => {
+        Syntax::LabelStmt { name, statement } => {
             out.write_all(name.as_slice())?;
             out.write_all(b":")?;
+            emit_js(out, map, *statement)?;
         }
         Syntax::CallArg { spread, value } => {
             if *spread {

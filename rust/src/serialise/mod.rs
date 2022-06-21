@@ -300,9 +300,10 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
             },
             "body": visit_node(m, *body),
         }),
-        Syntax::LabelStmt { name } => json!({
+        Syntax::LabelStmt { name, statement } => json!({
             "$t": "LabelStmt",
-            "value": name.as_str().to_string(),
+            "name": name.as_str().to_string(),
+            "statement": visit_node(m, *statement),
         }),
         Syntax::ReturnStmt { value } => json!({
             "$t": "ReturnStmt",

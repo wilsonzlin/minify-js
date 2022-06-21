@@ -470,7 +470,9 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
         Syntax::MemberExpr { left, .. } => {
             visit_node(s, m, updates, *left);
         }
-        Syntax::LabelStmt { name } => {}
+        Syntax::LabelStmt { statement, .. } => {
+            visit_node(s, m, updates, *statement);
+        }
         Syntax::CallArg { value, .. } => {
             visit_node(s, m, updates, *value);
         }

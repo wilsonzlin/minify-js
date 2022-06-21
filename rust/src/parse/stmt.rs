@@ -56,10 +56,14 @@ pub fn parse_stmt(
             let checkpoint = parser.checkpoint();
             let label_name = parser.next()?.loc_take();
             if parser.consume_if(TokenType::Colon)?.is_match() {
+                let statement = parse_stmt(scope, parser, syntax)?;
                 Ok(parser.create_node(
                     scope,
                     parser.since_checkpoint(checkpoint),
-                    Syntax::LabelStmt { name: label_name },
+                    Syntax::LabelStmt {
+                        name: label_name,
+                        statement,
+                    },
                 ))
             } else {
                 parser.restore_checkpoint(checkpoint);
@@ -237,6 +241,7 @@ pub fn parse_stmt_export(
     })
 }
 
+// WARNING: Do not reuse this functions for other statements, as this will output a statement node, not an expression, which can lead to double semicolons that cause invalid code when outputting.
 pub fn parse_stmt_expression(
     scope: ScopeId,
     parser: &mut Parser,
@@ -483,8 +488,11 @@ pub fn parse_stmt_return(
     } else if parser.consume_if(TokenType::Semicolon)?.is_match() {
         None
     } else {
-        // Use parse_stmt_expression to handle ASI.
-        let value = parse_stmt_expression(scope, parser, syntax)?;
+        let mut asi = Asi::can();
+        let value = parse_expr_with_asi(scope, parser, TokenType::Semicolon, &mut asi, syntax)?;
+        if !asi.did_end_with_asi {
+            parser.require(TokenType::Semicolon)?;
+        };
         loc.extend(parser[value].loc());
         Some(value)
     };
@@ -501,8 +509,11 @@ pub fn parse_stmt_throw(
         // Illegal under Automatic Semicolon Insertion rules.
         return Err(start.error(SyntaxErrorType::LineTerminatorAfterThrow));
     }
-    // Use parse_stmt_expression to handle ASI.
-    let value = parse_stmt_expression(scope, parser, syntax)?;
+    let mut asi = Asi::can();
+    let value = parse_expr_with_asi(scope, parser, TokenType::Semicolon, &mut asi, syntax)?;
+    if !asi.did_end_with_asi {
+        parser.require(TokenType::Semicolon)?;
+    };
     Ok(parser.create_node(
         scope,
         start.loc() + parser[value].loc(),
