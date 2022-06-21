@@ -52,16 +52,16 @@ fn test_emit() {
           }()
         "#,
         "\
-        function*gen(){yield*\"hello world!\";}\
+        function*gen(){yield*\"hello world!\"}\
         !()=>{\
         com.java.names.long;\
         module.functions;\
-        function a(){a();}\
+        function a(){a()}\
         var b=1,c,{brown:d,_:[e,f,,,...g],...h}=i;\
-        ({the:l}=a,[m]=2)=>{{let n=a(e);}l,m,d,e;return ;1.2.toString();}();;;\
+        ({the:l}=a,[m]=2)=>{{let n=a(e)};l,m,d,e;return;1.2.toString()}();\
         const i=({})=>{};\
-        const j=l=>{},k=(1/7)/(2/7);\
-        }();\
+        const j=l=>{},k=(1/7)/(2/7)\
+        }()\
         ",
     )
 }

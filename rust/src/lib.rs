@@ -44,7 +44,7 @@ pub enum MinifyError {
 /// let mut code: &[u8] = b"const main = () => { let my_first_variable = 1; };";
 /// let mut out = BufWriter::new(Vec::new());
 /// minify(code.to_vec(), &mut out).unwrap();
-/// assert_eq!(out.get_ref().as_slice(), b"const main=()=>{let a=1;};");
+/// assert_eq!(out.get_ref().as_slice(), b"const main=()=>{let a=1}");
 /// ```
 pub fn minify<T: Write>(source: Vec<u8>, output: &mut T) -> Result<(), MinifyError> {
     let lexer = Lexer::new(source);

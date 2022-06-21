@@ -235,14 +235,22 @@ fn get_leaf_node_type(m: &NodeMap, n: NodeId) -> LeafNodeType {
 // - Omit semicolons where possible.
 // - Insert semicolon after last statement if its leaf is a `if`, `for`, `while`, or `with` statement with an empty statement as its body e.g. `if (x) label: for (;;) while (x)` but not `if (x) for (;;) label: while (x) {}` or `if (x) for (;;) label: while (x) return`.
 fn emit_statements<T: Write>(out: &mut T, m: &NodeMap, statements: &[NodeId]) -> io::Result<()> {
-    for (i, n) in statements.iter().enumerate() {
-        if i > 0 {
-            out.write_all(b";")?;
-        };
+    // Since we skip over some statements, the last actual statement may not be the last in the list.
+    let mut last_statement: Option<NodeId> = None;
+    for n in statements {
+        if let Some(n) = last_statement {
+            match m[n].stx() {
+                Syntax::EmptyStmt {} | Syntax::FunctionDecl { .. } | Syntax::ClassDecl { .. } => {}
+                _ => {
+                    out.write_all(b";")?;
+                }
+            }
+        }
         emit_js(out, m, *n)?;
+        last_statement = Some(*n);
     }
-    if let Some(n) = statements.last() {
-        if get_leaf_node_type(m, *n) == LeafNodeType::EmptyStmt {
+    if let Some(n) = last_statement {
+        if get_leaf_node_type(m, n) == LeafNodeType::EmptyStmt {
             out.write_all(b";")?;
         }
     }
