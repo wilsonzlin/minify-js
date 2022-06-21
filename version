@@ -129,5 +129,5 @@ cmd("cargo", "generate-lockfile");
 cmd("git", "add", "-A");
 cmd("git", "commit", "-m", NEW_VERSION);
 cmd("git", "tag", "-a", `v${NEW_VERSION}`, "-m", "");
-cmd("cargo", "publish", "--allow-dirty");
+cmd("cargo", "publish", "--allow-dirty", { workingDir: "rust" });
 cmd("git", "push", "--follow-tags");
