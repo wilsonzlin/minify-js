@@ -29,7 +29,6 @@ pub enum TokenType {
     Caret,
     CaretEquals,
     ChevronLeft,
-    ChevronLeftAsTypeArgumentsList,
     ChevronLeftChevronLeft,
     ChevronLeftChevronLeftEquals,
     ChevronLeftEquals,
@@ -144,6 +143,7 @@ lazy_static! {
     set.insert(TokenType::KeywordOf);
     set.insert(TokenType::KeywordSet);
     set.insert(TokenType::KeywordStatic);
+    set.insert(TokenType::LiteralUndefined);
     set
   };
 }

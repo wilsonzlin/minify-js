@@ -638,13 +638,8 @@ pub fn lex_next(lexer: &mut Lexer, mode: LexMode) -> SyntaxResult<Token> {
                     TokenType::Slash if mode == LexMode::SlashIsRegex => {
                         lex_regex(lexer, preceded_by_line_terminator)
                     }
-                    mut typ => {
-                        if typ == TokenType::ChevronLeft
-                            && ID_CONTINUE_OR_PARENTHESIS_CLOSE_OR_BRACKET_CLOSE
-                                .has(lexer.prev_char())
-                        {
-                            typ = TokenType::ChevronLeftAsTypeArgumentsList;
-                        } else if typ == TokenType::Question && mat.len() != 1 {
+                    typ => {
+                        if typ == TokenType::Question && mat.len() != 1 {
                             // We've matched `?.[0-9]`.
                             mat = mat.prefix(1);
                         } else if KEYWORDS_MAPPING.contains_key(&typ)
