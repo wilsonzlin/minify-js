@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ops::Index;
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};

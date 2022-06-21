@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
 
 use crate::ast::NodeId;
-use crate::error::{SyntaxError, SyntaxErrorType, SyntaxResult};
+use crate::error::SyntaxResult;
 use crate::source::SourceRange;
 
 pub type Identifier = SourceRange;
