@@ -574,7 +574,11 @@ fn emit_js_under_operator<T: Write>(
         Syntax::IdentifierExpr { name } => {
             out.write_all(name.as_slice())?;
         }
-        Syntax::ImportExpr { module } => todo!(),
+        Syntax::ImportExpr { module } => {
+            out.write_all(b"import(")?;
+            emit_js(out, map, *module)?;
+            out.write_all(b")")?;
+        }
         Syntax::LiteralArrayExpr { elements } => {
             out.write_all(b"[")?;
             for (i, e) in elements.iter().enumerate() {

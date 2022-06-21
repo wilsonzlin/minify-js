@@ -5,9 +5,7 @@ use crate::ast::{
 use crate::error::{SyntaxErrorType, SyntaxResult};
 use crate::lex::{lex_template_string_continue, LexMode, KEYWORDS_MAPPING};
 use crate::operator::{Associativity, OperatorName, OPERATORS};
-use crate::parse::literal::{
-    normalise_literal_number, normalise_literal_string, parse_and_normalise_literal_string,
-};
+use crate::parse::literal::{normalise_literal_number, normalise_literal_string};
 use crate::parse::operator::{MULTARY_OPERATOR_MAPPING, UNARY_OPERATOR_MAPPING};
 use crate::parse::parser::Parser;
 use crate::parse::signature::parse_signature_function;
