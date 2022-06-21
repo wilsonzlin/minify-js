@@ -1,8 +1,8 @@
 use crate::{
     ast::{
         ArrayElement, ClassOrObjectMemberKey, ClassOrObjectMemberValue, ForInOfStmtHeaderLhs,
-        ForStmtHeader, ForThreeInit, LiteralTemplatePart, NodeData, NodeId, NodeMap,
-        ObjectMemberType, Syntax,
+        ForStmtHeader, ForThreeInit, LiteralTemplatePart, NodeId, NodeMap, ObjectMemberType,
+        Syntax,
     },
     char::{ID_CONTINUE_CHARSTR, ID_START_CHARSTR},
     lex::KEYWORD_STRS,

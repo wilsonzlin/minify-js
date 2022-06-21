@@ -6,7 +6,6 @@ use crate::ast::{
 use crate::operator::{OperatorName, OPERATORS};
 use lazy_static::lazy_static;
 use std::io::Write;
-use std::option;
 use std::{collections::HashMap, io};
 
 #[cfg(test)]
@@ -253,7 +252,9 @@ fn emit_js_under_operator<T: Write>(
                 emit_js(out, map, decl.pattern)?;
                 if let Some(expr) = &decl.initializer {
                     out.write_all(b"=")?;
-                    emit_js(out, map, *expr)?;
+                    // This is only really done for the Comma operator, which is the only operator below Assignment.
+                    let operator = &OPERATORS[&OperatorName::Assignment];
+                    emit_js_under_operator(out, map, *expr, Some(operator.precedence))?;
                 };
             }
         }
@@ -443,7 +444,7 @@ fn emit_js_under_operator<T: Write>(
             if must_parenthesise {
                 out.write_all(b"(")?;
             }
-            emit_js(out, map, *callee)?;
+            emit_js_under_operator(out, map, *callee, Some(operator.precedence))?;
             if *optional_chaining {
                 out.write_all(b"?.")?;
             }

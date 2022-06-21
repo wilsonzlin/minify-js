@@ -36,6 +36,8 @@ pub enum OperatorName {
     Comma,
     ComputedMemberAccess,
     Conditional,
+    // Only used during parsing.
+    ConditionalAlternate,
     Delete,
     Division,
     Equality,
@@ -171,6 +173,8 @@ const PRECEDENCE_LEVELS: &'static [&'static [(OperatorName, Arity, Associativity
         (Yield, Unary, Right),
         (YieldDelegated, Unary, Right),
     ],
+    // Given `a, b = true ? c : d = e, f`, the evaluation is `a, (b = (true ? c : (d = e))), e`.
+    &[(ConditionalAlternate, Ternary, Right)],
     &[(Comma, Binary, Left)],
 ];
 

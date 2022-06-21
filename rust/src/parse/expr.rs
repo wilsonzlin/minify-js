@@ -1,6 +1,6 @@
 use crate::ast::{
     ArrayElement, ArrayPatternElement, ClassOrObjectMemberKey, ClassOrObjectMemberValue,
-    LiteralTemplatePart, NodeData, NodeId, ObjectMemberType, Syntax,
+    LiteralTemplatePart, NodeId, ObjectMemberType, Syntax,
 };
 use crate::error::{SyntaxErrorType, TsResult};
 use crate::lex::{lex_template_string_continue, LexMode, KEYWORDS_MAPPING};
@@ -77,7 +77,6 @@ pub fn parse_expr(
     terminator: TokenType,
     syntax: &ParsePatternSyntax,
 ) -> TsResult<NodeId> {
-    let mut asi = Asi::no();
     parse_expr_with_min_prec(
         scope,
         parser,
@@ -85,7 +84,7 @@ pub fn parse_expr(
         terminator,
         TokenType::_Dummy,
         false,
-        &mut asi,
+        &mut Asi::no(),
         syntax,
     )
 }
@@ -116,7 +115,6 @@ pub fn parse_expr_until_either(
     terminator_b: TokenType,
     syntax: &ParsePatternSyntax,
 ) -> TsResult<NodeId> {
-    let mut asi = Asi::no();
     parse_expr_with_min_prec(
         scope,
         parser,
@@ -124,7 +122,7 @@ pub fn parse_expr_until_either(
         terminator_a,
         terminator_b,
         false,
-        &mut asi,
+        &mut Asi::no(),
         syntax,
     )
 }
@@ -737,7 +735,7 @@ fn transform_literal_expr_to_destructuring_pattern(
     }
 }
 
-// Trying to check if every object, array, or identifier expression operand is actually an assignment target first is too expensive wasteful, so simply retroactively transform the LHS of a BinaryExpr with Assignment* operator into a target, raising an error if it can't (and is an invalid assignment target). A valid target is:
+// Trying to check if every object, array, or identifier expression operand is actually an assignment target first is too expensive and wasteful, so simply retroactively transform the LHS of a BinaryExpr with Assignment* operator into a target, raising an error if it can't (and is an invalid assignment target). A valid target is:
 // - A chain of non-optional-chaining member, computed member, and call operators, not ending in a call.
 // - A pattern.
 fn convert_assignment_lhs_to_target(
@@ -765,8 +763,14 @@ fn convert_assignment_lhs_to_target(
             updates.apply_updates(parser.node_map_mut());
             Ok(root)
         }
-        Syntax::ComputedMemberExpr { .. } | Syntax::MemberExpr { .. } => {
-            // As long as the expression ends with ComputedMemberExpr or MemberExpr, it's valid e.g. `(a, b?.a ?? 3, c = d || {})[1] = x`.
+        Syntax::ComputedMemberExpr {
+            optional_chaining, ..
+        }
+        | Syntax::MemberExpr {
+            optional_chaining, ..
+        } if !optional_chaining => {
+            // As long as the expression ends with ComputedMemberExpr or MemberExpr, it's valid e.g. `(a, b?.a ?? 3, c = d || {})[1] = x`. Note that this is after parsing, so `a + b.c = 3` is invalid because that parses to `(a + b.c) = 3`, with a LHS of BinaryExpr with Addition operator.
+            // TODO Technically there cannot be any optional chaining in the entire access/call path, not just in the last part (e.g. `a.b?.c.d = e` is invalid).
             Ok(lhs)
         }
         _ => Err(parser[lhs].error(SyntaxErrorType::InvalidAssigmentTarget)),
@@ -879,21 +883,12 @@ pub fn parse_expr_with_min_prec(
                         )
                     }
                     OperatorName::Conditional => {
-                        let consequent = parse_expr_with_min_prec(
-                            scope,
-                            parser,
-                            1,
-                            TokenType::Colon,
-                            TokenType::_Dummy,
-                            false,
-                            &mut Asi::no(),
-                            syntax,
-                        )?;
+                        let consequent = parse_expr(scope, parser, TokenType::Colon, syntax)?;
                         parser.require(TokenType::Colon)?;
                         let alternate = parse_expr_with_min_prec(
                             scope,
                             parser,
-                            1,
+                            OPERATORS[&OperatorName::ConditionalAlternate].precedence,
                             terminator_a,
                             terminator_b,
                             false,

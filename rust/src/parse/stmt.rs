@@ -156,7 +156,7 @@ pub fn parse_stmt_continue(
 }
 
 pub fn parse_stmt_debugger(scope: ScopeId, parser: &mut Parser) -> TsResult<NodeId> {
-    let mut loc = parser.require(TokenType::KeywordDebugger)?.loc_take();
+    let loc = parser.require(TokenType::KeywordDebugger)?.loc_take();
     Ok(parser.create_node(scope, loc, Syntax::DebuggerStmt {}))
 }
 
