@@ -16,8 +16,8 @@ const ALT_MINIFIED_NAMES: &'static [char] = &[
     '\u{02B8}', '\u{02B9}', '\u{02BA}', '\u{02BB}', '\u{02BC}', '\u{02BD}', '\u{02BE}', '\u{02BF}',
     '\u{02C0}', '\u{02C1}', '\u{02C6}', '\u{02C7}', '\u{02C8}', '\u{02C9}', '\u{02CA}', '\u{02CB}',
     '\u{02CC}', '\u{02CD}', '\u{02CE}', '\u{02CF}', '\u{02D0}', '\u{02D1}', '\u{02E0}', '\u{02E1}',
-    '\u{02E2}', '\u{02E3}', '\u{02E4}', '\u{02EC}', '\u{02EE}', '\u{0374}', '\u{037A}', '\u{0559}',
-    '\u{0640}', '\u{06E5}', '\u{06E6}', '\u{07F4}', '\u{07F5}', '\u{07FA}',
+    '\u{02E2}', '\u{02E3}', '\u{02E4}', '\u{02EC}', '\u{02EE}', '\u{0300}', '\u{0374}', '\u{037A}',
+    '\u{0559}', '\u{0640}', '\u{06E5}', '\u{06E6}', '\u{07F4}', '\u{07F5}', '\u{07FA}',
 ];
 
 fn generate_minified_name(mut id: usize) -> SourceRange {
@@ -33,7 +33,7 @@ fn generate_minified_name(mut id: usize) -> SourceRange {
     if let Some(alt_id) = KEYWORD_STRS.get(name.as_slice()) {
         // This name is a keyword, so we replace it with a Unicode character instead.
         // This Unicode character is 2 bytes when encoded in UTF-8, so it's more than minimal enough. UTF-8 encodes U+0080 to U+07FF in 2 bytes.
-        // There should be at least one ALT_MINIFIED_NAMES element for each keyword.
+        // There should be exactly one ALT_MINIFIED_NAMES element for each KEYWORD_STRS entry.
         // Using a Unicode name will ensure no chance of clashing with keywords, well-knowns, and almost all variables.
         // Clashes can appear quickly e.g. `in`, `of`, `if`.
         let s = ALT_MINIFIED_NAMES[*alt_id].encode_utf8(&mut name).len();

@@ -51,21 +51,14 @@ impl NodeData {
     }
 }
 
-impl PartialEq for NodeData {
-    fn eq(&self, other: &Self) -> bool {
-        self.stx() == other.stx()
-    }
-}
-
-impl Eq for NodeData {}
-
 impl Debug for NodeData {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_fmt(format_args!("{:?}", self.stx))
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// To prevent ambiguity and confusion, don't derive Eq, as two nodes could be structurally equal even if they are different nodes.
+#[derive(Debug, Clone, Copy)]
 pub struct NodeId(usize);
 
 impl NodeId {
@@ -133,21 +126,21 @@ pub enum VarDeclMode {
     Var,
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Debug)]
 pub enum ArrayElement {
     Single(Expression),
     Rest(Expression),
     Empty,
 }
 
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Clone, Debug)]
 pub enum ClassOrObjectMemberKey {
     // Identifier, keyword, string, or number.
     Direct(SourceRange),
     Computed(Expression),
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Debug)]
 pub enum ClassOrObjectMemberValue {
     Getter {
         body: Statement,
@@ -168,14 +161,14 @@ pub enum ClassOrObjectMemberValue {
     },
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Debug)]
 pub struct ClassMember {
     pub key: ClassOrObjectMemberKey,
     pub statik: bool,
     pub value: ClassOrObjectMemberValue,
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Debug)]
 pub enum ObjectMemberType {
     Valued {
         key: ClassOrObjectMemberKey,
@@ -189,7 +182,7 @@ pub enum ObjectMemberType {
     },
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Debug)]
 pub struct ArrayPatternElement {
     pub target: Pattern,
     pub default_value: Option<Expression>,
@@ -217,26 +210,26 @@ pub enum ExportNames {
     Specific(Vec<(ImportOrExportName, Option<ImportOrExportName>)>),
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Debug)]
 pub struct VariableDeclarator {
     pub pattern: Pattern,
     pub initializer: Option<Expression>,
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Debug)]
 pub enum ForThreeInit {
     None,
     Expression(Expression),
     Declaration(Declaration),
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Debug)]
 pub enum ForInOfStmtHeaderLhs {
     Declaration(Declaration),
     Pattern(Pattern),
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Debug)]
 pub enum ForStmtHeader {
     Three {
         init: ForThreeInit,
@@ -250,13 +243,14 @@ pub enum ForStmtHeader {
     },
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Debug)]
 pub enum LiteralTemplatePart {
     Substitution(Expression),
     String(SourceRange),
 }
 
-#[derive(Eq, PartialEq, Debug)]
+// We no longer derive Eq for the AST due to use of NodeId, as it's not possible to determine structural equality without the node map. Anything that contains a NodeId/Syntax must also avoid Eq.
+#[derive(Debug)]
 pub enum Syntax {
     // Patterns.
     IdentifierPattern {
