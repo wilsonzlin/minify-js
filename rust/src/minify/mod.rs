@@ -431,9 +431,6 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
             visit_node(s, m, updates, *condition);
             visit_node(s, m, updates, *body);
         }
-        Syntax::YieldExpr { argument, .. } => {
-            visit_node(s, m, updates, *argument);
-        }
         Syntax::ObjectMember { typ } => {
             match typ {
                 ObjectMemberType::Valued { key, value } => {

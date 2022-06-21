@@ -350,19 +350,18 @@ pub fn parse_expr_function(
     let fn_scope = parser.create_child_scope(scope, ScopeType::Closure);
     let start = parser.require(TokenType::KeywordFunction)?.loc().clone();
     let generator = parser.consume_if(TokenType::Asterisk)?.is_match();
-    // WARNING: The name belongs in the containing scope, not the function's scope.
-    // For example, `function a() { let a = 1; }` is legal.
+    // WARNING: Unlike function declarations, function expressions are not declared within their current closure or block. However, their names cannot be assigned to within the function (it has no effect) and they can be "redeclared" e.g. `(function a() { let a = 1; })()`.
     let name = match parser.peek()? {
         t if is_valid_pattern_identifier(t.typ(), syntax) => {
             parser.consume_peeked();
             let name_node = parser.create_node(
-                scope,
+                fn_scope,
                 t.loc().clone(),
                 Syntax::ClassOrFunctionName {
                     name: t.loc().clone(),
                 },
             );
-            parser[scope].add_symbol(t.loc().clone(), Symbol::new(name_node))?;
+            parser[fn_scope].add_symbol(t.loc().clone(), Symbol::new(name_node))?;
             Some(name_node)
         }
         _ => None,

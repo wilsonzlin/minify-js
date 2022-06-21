@@ -390,10 +390,6 @@ pub enum Syntax {
         operator: OperatorName,
         argument: Expression,
     },
-    YieldExpr {
-        argument: Expression,
-        delegate: bool,
-    },
 
     // Statements.
     BlockStmt {

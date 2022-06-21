@@ -654,14 +654,6 @@ fn emit_js_under_operator<T: Write>(
                 out.write_all(b")")?;
             };
         }
-        Syntax::YieldExpr { argument, delegate } => {
-            out.write_all(b"yield")?;
-            if *delegate {
-                out.write_all(b"*")?;
-            }
-            out.write_all(b" ")?;
-            emit_js(out, map, *argument)?;
-        }
         Syntax::BlockStmt { body } => {
             out.write_all(b"{")?;
             emit_statements(out, map, &body)?;
