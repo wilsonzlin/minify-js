@@ -68,7 +68,7 @@ impl SyntaxError {
 impl Debug for SyntaxError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_fmt(format_args!(
-            "{:?} [{} {:?}] context: {}",
+            "{:?} [position={} token={:?}] around ```{}```",
             self.typ,
             self.position,
             self.actual_token,
