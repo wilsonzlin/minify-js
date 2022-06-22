@@ -13,6 +13,7 @@ Extremely fast JavaScript minifier, written in Rust.
 
 - Fast parsing powered by SIMD instructions and lookup tables.
 - Minification of identifiers.
+- Omits semicolons, spaces, parentheses, and braces where possible.
 
 ## Usage
 
@@ -53,7 +54,6 @@ assert_eq!(out.as_slice(), b"let x=1");
 ## In progress
 
 - Combine and reorder declarations.
-- Omit more semicolons, spaces, parentheses, and braces.
 - Minify import and export syntax.
 - More extensive testing, especially over rare syntax.
 - Evaluation and folding of constant expressions.
