@@ -14,7 +14,6 @@ fn parse_stmt_and_serialise(input: Vec<u8>) -> Value {
         &mut parser,
         &ParsePatternSyntax {
             await_allowed: true,
-            async_allowed: true,
             yield_allowed: true,
         },
     )

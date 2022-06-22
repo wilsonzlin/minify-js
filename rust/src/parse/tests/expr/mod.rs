@@ -12,7 +12,6 @@ fn parse_expr_and_serialise(input: Vec<u8>) -> Value {
     let scope = parser.create_global_scope();
     let syntax = ParsePatternSyntax {
         await_allowed: true,
-        async_allowed: true,
         yield_allowed: true,
     };
     let node_id = parse_expr(scope, &mut parser, TokenType::Semicolon, &syntax).unwrap();
