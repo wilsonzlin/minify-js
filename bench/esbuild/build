@@ -4,6 +4,8 @@ set -Eeuo pipefail
 
 pushd "$(dirname "$0")" >/dev/null
 
+go mod tidy
+go mod download
 go build -o run
 
 popd >/dev/null
