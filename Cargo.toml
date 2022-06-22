@@ -2,6 +2,7 @@
 members = [
     "bench/minify-js",
     "cli",
+    "nodejs",
     "rust",
 ]
 

@@ -1,0 +1,6 @@
+/Cargo.lock
+/index.node
+/package-lock.json
+/target/
+node_modules/
+npm-debug.log*

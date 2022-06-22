@@ -1,0 +1,78 @@
+name: Build and publish Node.js package
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-11.0, ubuntu-18.04, windows-2019]
+    steps:
+      - uses: actions/checkout@v1
+
+      - name: Get version
+        id: version
+        shell: bash
+        run: echo ::set-output name=VERSION::"$([[ "$GITHUB_REF" == refs/tags/v* ]] && echo ${GITHUB_REF#refs/tags/v} || echo '0.0.0')"
+
+      - name: Set up Node.js
+        if: runner.name != 'macos-arm64'
+        uses: actions/setup-node@master
+        with:
+          node-version: 18.x
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          default: true
+
+      - name: Build native module
+        working-directory: ./nodejs
+        id: module
+        shell: bash
+        run: |
+          npm install
+          npm run build-release
+          echo ::set-output name=BINARY_NAME::"$(node -e 'console.log([process.platform, process.arch].join("__"))')"
+
+      - name: Upload to B2
+        uses: wilsonzlin/b2-upload-action@v1.0.0
+        with:
+          bucket: ${{ secrets.B2_BUCKET_NAME }}
+          uploadKey: minify-js/nodejs/${{ steps.version.outputs.VERSION }}/${{ steps.module.outputs.BINARY_NAME }}.node
+          keyId: ${{ secrets.B2_KEY_ID }}
+          applicationKey: ${{ secrets.B2_APPLICATION_KEY }}
+          file: ./nodejs/index.node
+
+  package:
+    runs-on: ubuntu-18.04
+    needs: build
+    steps:
+      - uses: actions/checkout@v1
+      - name: Get version
+        id: version
+        shell: bash
+        run: echo ::set-output name=VERSION::"$([[ "$GITHUB_REF" == refs/tags/v* ]] && echo ${GITHUB_REF#refs/tags/v} || echo '0.0.0')"
+      - name: Set up Node.js
+        uses: actions/setup-node@master
+        with:
+          node-version: 18.x
+      - name: Pack and publish package
+        working-directory: ./nodejs
+        run: |
+          cat << 'EOF' > .npmrc
+          package-lock=false
+          //registry.npmjs.org/:_authToken=${{ secrets.NPM_AUTH_TOKEN }}
+          EOF
+          # npm refuses to work with symlinks.
+          cp ../README.md .
+          if [[ "${{ steps.version.outputs.VERSION }}" != "0.0.0" ]]; then
+            npm publish --access public
+          fi

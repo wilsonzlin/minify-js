@@ -90,8 +90,16 @@ cmd("git", "pull");
 cmd("cargo", "fmt");
 cmd("cargo", "test");
 
-for (const f of ["rust/Cargo.toml", "cli/Cargo.toml"]) {
+for (const f of ["rust/Cargo.toml", "cli/Cargo.toml", "nodejs/Cargo.toml"]) {
   replaceInFile(f, /^version = "\d+\.\d+\.\d+"/m, `version = "${NEW_VERSION}"`);
+}
+
+for (const f of ["nodejs/package.json"]) {
+  replaceInFile(
+    f,
+    /^(\s*"version": )"\d+\.\d+\.\d+",\s*$/m,
+    `$1"${NEW_VERSION}",`
+  );
 }
 
 for (const f of ["README.md"]) {
