@@ -83,7 +83,8 @@ const min = minify(src);
 - Parse and erase TypeScript syntax.
 - FFI libraries for other languages.
 - Aliasing of reused well-knowns.
-- Removal of unreachable and redundant code.
+- Removal of unreachable, unused, and redundant code.
+- Inlining single-use declarations.
 - Aliasing frequently accessed properties and called methods.
 - Better support for non-ASCII identifiers.
 - Replacing if statements with conditional and logical expressions.
@@ -91,6 +92,7 @@ const min = minify(src);
 - Micro-optimisations:
   - Unwrap string literal computed members, then identifier or number string members.
   - Replace `x === null || x === undefined` with `x == null`, where `x` is side-effect free.
+  - Replace `typeof x === "undefined"` with `x === undefined`.
   - Using shorthand properties and Object.assign.
   - (Dangerous) Replace functions without use of `this` with arrow functions.
   - Replace `void x` with `undefined`, where `x` is side-effect free.
@@ -99,3 +101,5 @@ const min = minify(src);
   - Hoist `let` and `const`.
   - Unwrapping blocks.
   - Unwrapping paretheses, altering expressions as necessary.
+  - Replace `typeof` and `instanceof` with functions.
+  - `if (...) return a; else if (...) return b; else return c` => `return (...) ? a : (...) ? b : c`.
