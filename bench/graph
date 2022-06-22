@@ -35,7 +35,7 @@ set title "Total minification time"
 set key off
 set xtics font "Arial,14"
 set format y "%g s"
-set yrange [0:11]
+set yrange [0:*]
 
 set style fill solid
 set boxwidth 0.5 relative
