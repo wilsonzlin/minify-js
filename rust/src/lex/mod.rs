@@ -393,7 +393,7 @@ fn lex_identifier(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> Synta
     loop {
         lexer.consume(lexer.while_chars(&ID_CONTINUE));
         // TODO We assume if it's not ASCII it's part of a UTF-8 byte sequence, and that sequence represents a valid JS identifier continue code point.
-        if lexer.peek(0)?.is_ascii() {
+        if lexer.peek_or_eof(0).filter(|c| !c.is_ascii()).is_none() {
             break;
         };
         lexer.skip_expect(1);
@@ -599,11 +599,10 @@ pub fn lex_next(lexer: &mut Lexer, mode: LexMode) -> SyntaxResult<Token> {
         };
 
         // TODO We assume that if it's a UTF-8 non-ASCII sequence it's an identifier, but JS only allows a few Unicode property types as identifiers.
-        let is_utf8_start = match lexer.peek(0)? {
-            c if c >> 5 == 0b110 => true,
-            c if c >> 4 == 0b1110 => true,
-            c if c >> 3 == 0b11110 => true,
-            _ => false,
+        let is_utf8_start = if let Some(c) = lexer.peek_or_eof(0) {
+            c >> 5 == 0b110 || c >> 4 == 0b1110 || c >> 3 == 0b11110
+        } else {
+            false
         };
 
         if is_utf8_start {
