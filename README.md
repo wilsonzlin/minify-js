@@ -27,9 +27,9 @@ Comparison with esbuild, run on [common libraries](./bench).
 
 Precompiled binaries are available for Linux, macOS, and Windows.
 
-[Linux x64](https://static.wilsonl.in/minify-js/cli/0.1.1/linux-x86_64/minify-js) |
-[macOS x64](https://static.wilsonl.in/minify-js/cli/0.1.1/macos-x86_64/minify-js) |
-[Windows x64](https://static.wilsonl.in/minify-js/cli/0.1.1/windows-x86_64/minify-js.exe)
+[Linux x64](https://static.wilsonl.in/minify-js/cli/0.1.2/linux-x86_64/minify-js) |
+[macOS x64](https://static.wilsonl.in/minify-js/cli/0.1.2/macos-x86_64/minify-js) |
+[Windows x64](https://static.wilsonl.in/minify-js/cli/0.1.2/windows-x86_64/minify-js.exe)
 
 Use the `--help` argument for more details.
 
@@ -43,7 +43,7 @@ Add the dependency:
 
 ```toml
 [dependencies]
-minify-js = "0.1.1"
+minify-js = "0.1.2"
 ```
 
 Call the method:
