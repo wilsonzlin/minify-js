@@ -17,7 +17,6 @@ pub fn parse_top_level(parser: &mut Parser) -> SyntaxResult<ParseTopLevelResult>
     let mut body: Vec<NodeId> = Vec::new();
     let syntax = ParsePatternSyntax {
         await_allowed: true,
-        async_allowed: true,
         yield_allowed: true,
     };
     while !parser.consume_if(TokenType::EOF)?.is_match() {

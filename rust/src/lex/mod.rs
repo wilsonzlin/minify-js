@@ -179,6 +179,12 @@ impl Lexer {
         self.next += m.len;
     }
 
+    fn consume_next(&mut self) -> SyntaxResult<u8> {
+        let c = self.peek(0)?;
+        self.next += 1;
+        Ok(c)
+    }
+
     fn skip_expect(&mut self, n: usize) -> () {
         debug_assert!(self.next + n <= self.end());
         self.next += n;
@@ -458,9 +464,8 @@ fn lex_regex(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> SyntaxResu
     let mut in_charset = false;
     loop {
         // WARNING: Does not consider other line terminators allowed by spec.
-        match lexer.peek(0)? {
+        match lexer.consume_next()? {
             b'\\' => {
-                lexer.skip_expect(1);
                 // Cannot escape line terminator.
                 // WARNING: Does not consider other line terminators allowed by spec.
                 if lexer.peek(1)? == b'\n' {
@@ -469,21 +474,18 @@ fn lex_regex(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> SyntaxResu
                 lexer.skip_expect(1);
             }
             b'/' if !in_charset => {
-                lexer.skip_expect(1);
                 break;
             }
             b'[' => {
-                lexer.skip_expect(1);
                 in_charset = true;
             }
             b']' if in_charset => {
-                lexer.skip_expect(1);
                 in_charset = false;
             }
             b'\n' => {
                 return Err(lexer.error(SyntaxErrorType::LineTerminatorInRegex));
             }
-            _ => lexer.skip_expect(1),
+            _ => {}
         };
     }
     lexer.consume(lexer.while_chars(&ID_CONTINUE));
@@ -610,7 +612,7 @@ pub fn lex_next(lexer: &mut Lexer, mode: LexMode) -> SyntaxResult<Token> {
                     TokenType::LiteralTemplatePartString => {
                         lex_template(lexer, preceded_by_line_terminator)
                     }
-                    TokenType::Slash if mode == LexMode::SlashIsRegex => {
+                    TokenType::Slash | TokenType::SlashEquals if mode == LexMode::SlashIsRegex => {
                         lex_regex(lexer, preceded_by_line_terminator)
                     }
                     typ => {

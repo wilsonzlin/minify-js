@@ -17,8 +17,6 @@ pub enum ParsePatternAction {
 pub struct ParsePatternSyntax {
     // `await` is not allowed as an arrow function parameter or a parameter/variable inside an async function.
     pub await_allowed: bool,
-    // `async` is not allowed as a parameter/variable inside an async function.
-    pub async_allowed: bool,
     // `yield` is not allowed as a parameter/variable inside a generator function.
     pub yield_allowed: bool,
 }
@@ -26,7 +24,6 @@ pub struct ParsePatternSyntax {
 pub fn is_valid_pattern_identifier(typ: TokenType, syntax: &ParsePatternSyntax) -> bool {
     match typ {
         TokenType::Identifier => true,
-        TokenType::KeywordAsync if syntax.async_allowed => true,
         TokenType::KeywordAwait if syntax.await_allowed => true,
         TokenType::KeywordYield if syntax.yield_allowed => true,
         t if UNRESERVED_KEYWORDS.contains(&t) => true,

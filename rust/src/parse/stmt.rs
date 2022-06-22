@@ -43,7 +43,9 @@ pub fn parse_stmt(
         TokenType::KeywordDo => parse_stmt_do_while(scope, parser, syntax),
         TokenType::KeywordExport => parse_stmt_export(scope, parser, syntax),
         TokenType::KeywordFor => parse_stmt_for(scope, parser, syntax),
-        TokenType::KeywordFunction => parse_decl_function(scope, parser, syntax),
+        TokenType::KeywordAsync | TokenType::KeywordFunction => {
+            parse_decl_function(scope, parser, syntax)
+        }
         TokenType::KeywordIf => parse_stmt_if(scope, parser, syntax),
         TokenType::KeywordImport => parse_stmt_import_or_expr_import(scope, parser, syntax),
         TokenType::KeywordReturn => parse_stmt_return(scope, parser, syntax),

@@ -294,7 +294,6 @@ pub fn parse_expr_arrow_function(
         && is_valid_pattern_identifier(
             parser.peek()?.typ(),
             &ParsePatternSyntax {
-                async_allowed: syntax.async_allowed,
                 await_allowed: false,
                 yield_allowed: syntax.yield_allowed,
             },
@@ -531,17 +530,39 @@ fn parse_expr_operand(
                 parser.restore_checkpoint(cp);
                 parse_expr_object(scope, parser, syntax)?
             }
-            typ if is_valid_pattern_identifier(
-                typ,
-                &ParsePatternSyntax {
-                    async_allowed: syntax.async_allowed,
-                    await_allowed: false,
-                    yield_allowed: syntax.yield_allowed,
-                },
-            ) =>
-            {
+            // Check this before is_valid_pattern_identifier.
+            TokenType::KeywordAsync => {
+                match parser.peek()?.typ() {
+                    TokenType::ParenthesisOpen => {
+                        parser.restore_checkpoint(cp);
+                        parse_expr_arrow_function(
+                            scope,
+                            parser,
+                            terminator_a,
+                            terminator_b,
+                            syntax,
+                        )?
+                    }
+                    TokenType::KeywordFunction => {
+                        parser.restore_checkpoint(cp);
+                        parse_expr_function(scope, parser, syntax)?
+                    }
+                    _ => {
+                        // `await` is being used as an identifier.
+                        parser.create_node(
+                            scope,
+                            t.loc().clone(),
+                            Syntax::IdentifierExpr {
+                                name: t.loc().clone(),
+                            },
+                        )
+                    }
+                }
+            }
+            typ if is_valid_pattern_identifier(typ, syntax) => {
                 if parser.peek()?.typ() == TokenType::EqualsChevronRight {
                     // Single-unparenthesised-parameter arrow function.
+                    // NOTE: `await` is not allowed as an arrow function parameter, but we'll check this in parse_expr_arrow_function.
                     parser.restore_checkpoint(cp);
                     parse_expr_arrow_function(scope, parser, terminator_a, terminator_b, syntax)?
                 } else {
@@ -557,15 +578,6 @@ fn parse_expr_operand(
             TokenType::KeywordClass => {
                 parser.restore_checkpoint(cp);
                 parse_expr_class(scope, parser, syntax)?
-            }
-            TokenType::KeywordAsync => {
-                let is_arrow = parser.peek()?.typ() == TokenType::ParenthesisOpen;
-                parser.restore_checkpoint(cp);
-                if is_arrow {
-                    parse_expr_arrow_function(scope, parser, terminator_a, terminator_b, syntax)?
-                } else {
-                    parse_expr_function(scope, parser, syntax)?
-                }
             }
             TokenType::KeywordFunction => {
                 parser.restore_checkpoint(cp);

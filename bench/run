@@ -10,7 +10,7 @@ for input in _input/*; do
   echo "# $input"
   echo "========"
   for candidate in esbuild minify-js; do
-    echo -n "$candidate"
+    echo -n "$candidate "
     "./$candidate/run" "$PWD/$input" 10
   done
   echo

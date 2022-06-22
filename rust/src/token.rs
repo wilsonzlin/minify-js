@@ -136,6 +136,7 @@ lazy_static! {
   pub static ref UNRESERVED_KEYWORDS: HashSet<TokenType> = {
     let mut set = HashSet::<TokenType>::new();
     set.insert(TokenType::KeywordAs);
+    set.insert(TokenType::KeywordAsync);
     set.insert(TokenType::KeywordConstructor);
     set.insert(TokenType::KeywordFrom);
     set.insert(TokenType::KeywordGet);
