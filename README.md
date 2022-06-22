@@ -20,9 +20,9 @@ Extremely fast JavaScript minifier, written in Rust.
 
 Precompiled binaries are available for Linux, macOS, and Windows.
 
-[Linux x64](https://wilsonl.in/minify-html/cli/0.0.2/x86_64/minify-js) |
-[macOS x64](https://wilsonl.in/minify-html/cli/0.0.2/x86_64/minify-js) |
-[Windows x64](https://wilsonl.in/minify-html/cli/0.0.2/x86_64/minify-js.exe)
+[Linux x64](https://static.wilsonl.in/minify-js/cli/0.0.2/x86_64/minify-js) |
+[macOS x64](https://static.wilsonl.in/minify-js/cli/0.0.2/x86_64/minify-js) |
+[Windows x64](https://static.wilsonl.in/minify-js/cli/0.0.2/x86_64/minify-js.exe)
 
 Use the `--help` argument for more details.
 
