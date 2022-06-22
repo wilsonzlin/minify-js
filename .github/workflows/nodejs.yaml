@@ -52,7 +52,7 @@ jobs:
           file: ./nodejs/index.node
 
   package:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     needs: build
     steps:
       - uses: actions/checkout@v1
