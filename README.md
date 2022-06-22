@@ -9,6 +9,12 @@ Extremely fast JavaScript minifier, written in Rust.
 - Minification of individual inputs/files only; no bundling or transforming.
 - Prefer minimal complexity and faster performance over maximum configurability and minimal extra compression.
 
+## Performance
+
+Comparison with esbuild, run on [common libraries](./bench).
+
+<img width="400" alt="Chart showing speed of JS minifiers" src="https://wilsonl.in/minify-js/bench/0.1.1/total-times.svg"><img width="400" alt="Chart showing compression of JS minifiers" src="https://wilsonl.in/minify-js/bench/0.1.1/average-sizes.svg">
+
 ## Features
 
 - Fast parsing powered by SIMD instructions and lookup tables.

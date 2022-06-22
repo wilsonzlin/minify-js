@@ -6,14 +6,41 @@ shopt -s nullglob
 
 pushd "$(dirname "$0")" >/dev/null
 
-for input in _input/*; do
-  echo "# $input"
-  echo "========"
-  for candidate in esbuild minify-js; do
-    echo -n "$candidate "
-    "./$candidate/run" "$PWD/$input" 10
+candidates=('esbuild' 'minify-js')
+candidate_output_min_lens=(0 0)
+candidate_output_times=(0 0)
+inputs=(_input/*)
+src_len_sum=0
+
+for input in ${inputs[@]}; do
+  src_len=$(wc -c < "$PWD/$input")
+  src_len_sum=$(( src_len_sum + src_len ))
+done
+
+for candidate_idx in ${!candidates[@]}; do
+  candidate=${candidates[$candidate_idx]}
+  for input in ${inputs[@]}; do
+    raw=$("./$candidate/run" "$PWD/$input" 10)
+    res=($raw)
+    min_len=${res[0]}
+    time_ns=${res[1]}
+    candidate_output_min_lens[$candidate_idx]=$(( candidate_output_min_lens[candidate_idx] + min_len ))
+    candidate_output_times[$candidate_idx]=$(( candidate_output_times[candidate_idx] + time_ns ))
   done
-  echo
+done
+
+rm -rf results
+mkdir results
+for candidate_idx in ${!candidates[@]}; do
+  candidate=${candidates[$candidate_idx]}
+
+  min_len_sum=${candidate_output_min_lens[$candidate_idx]}
+  avg_min_pct=$(bc -l <<< "($min_len_sum/$src_len_sum) * 100")
+  echo -e "$candidate_idx\t$candidate\t$avg_min_pct" >> results/average-sizes.txt
+
+  time_ns_sum=${candidate_output_times[$candidate_idx]}
+  time_sec_sum=$(bc -l <<< "$time_ns_sum / 1000000000")
+  echo -e "$candidate_idx\t$candidate\t$time_sec_sum" >> results/total-times.txt
 done
 
 popd >/dev/null

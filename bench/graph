@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+
+set -Eeuxo pipefail
+
+pushd "$(dirname "$0")" >/dev/null
+
+rm -rf graphs
+mkdir graphs
+
+gnuplot << 'EOD'
+set terminal svg
+set output "graphs/average-sizes.svg"
+
+set title font "Arial,18"
+set title "Average minified size"
+set key off
+set xtics font "Arial,14"
+set format y "%g%%"
+
+set style fill solid
+set boxwidth 0.5 relative
+set yrange [0:100]
+
+set linetype 1 lc rgb "#bcbcbc"
+set linetype 2 lc rgb "#2e61bd"
+plot "results/average-sizes.txt" u 1:3:($1+1):xtic(2) with boxes linecolor variable
+EOD
+
+gnuplot << 'EOD'
+set terminal svg
+set output "graphs/total-times.svg"
+
+set title font "Arial,18"
+set title "Total minification time"
+set key off
+set xtics font "Arial,14"
+set format y "%g s"
+set yrange [0:11]
+
+set style fill solid
+set boxwidth 0.5 relative
+
+set linetype 1 lc rgb "#bcbcbc"
+set linetype 2 lc rgb "#2e61bd"
+plot "results/total-times.txt" u 1:3:($1+1):xtic(2) with boxes linecolor variable
+EOD
+
+popd >/dev/null
