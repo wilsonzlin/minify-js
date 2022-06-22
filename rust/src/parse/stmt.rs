@@ -135,7 +135,8 @@ fn parse_stmt_break_or_continue(
         } else if next.typ() == TokenType::Semicolon {
             parser.consume_peeked();
             None
-        } else if next.preceded_by_line_terminator() {
+        } else if next.preceded_by_line_terminator() || next.typ() == TokenType::BraceClose {
+            // ASI.
             None
         } else {
             return Err(next.error(SyntaxErrorType::ExpectedSyntax("continue label")));
@@ -484,7 +485,9 @@ pub fn parse_stmt_return(
 ) -> SyntaxResult<NodeId> {
     let start = parser.require(TokenType::KeywordReturn)?;
     let mut loc = start.loc().clone();
-    let value = if parser.peek()?.preceded_by_line_terminator() {
+    let value = if parser.peek()?.preceded_by_line_terminator()
+        || parser.peek()?.typ() == TokenType::BraceClose
+    {
         // Automatic Semicolon Insertion.
         None
     } else if parser.consume_if(TokenType::Semicolon)?.is_match() {

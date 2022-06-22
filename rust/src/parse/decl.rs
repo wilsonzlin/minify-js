@@ -72,6 +72,10 @@ pub fn parse_decl_var(
                 if parser.consume_if(TokenType::Semicolon)?.is_match() || asi.did_end_with_asi {
                     break;
                 }
+                let t = parser.peek()?;
+                if t.preceded_by_line_terminator() && t.typ() != TokenType::Comma {
+                    break;
+                };
                 parser.require(TokenType::Comma)?;
             }
             VarDeclParseMode::Leftmost => {

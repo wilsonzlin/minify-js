@@ -390,7 +390,14 @@ fn lex_identifier(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> Synta
     let cp = lexer.checkpoint();
     // Consume starter.
     lexer.skip_expect(1);
-    lexer.consume(lexer.while_chars(&ID_CONTINUE));
+    loop {
+        lexer.consume(lexer.while_chars(&ID_CONTINUE));
+        // TODO We assume if it's not ASCII it's part of a UTF-8 byte sequence, and that sequence represents a valid JS identifier continue code point.
+        if lexer.peek(0)?.is_ascii() {
+            break;
+        };
+        lexer.skip_expect(1);
+    }
     Ok(Token::new(
         lexer.since_checkpoint(cp),
         TokenType::Identifier,
@@ -591,10 +598,26 @@ pub fn lex_next(lexer: &mut Lexer, mode: LexMode) -> SyntaxResult<Token> {
             ));
         };
 
+        // TODO We assume that if it's a UTF-8 non-ASCII sequence it's an identifier, but JS only allows a few Unicode property types as identifiers.
+        let is_utf8_start = match lexer.peek(0)? {
+            c if c >> 5 == 0b110 => true,
+            c if c >> 4 == 0b1110 => true,
+            c if c >> 3 == 0b11110 => true,
+            _ => false,
+        };
+
+        if is_utf8_start {
+            return lex_identifier(lexer, preceded_by_line_terminator);
+        };
+
         let AhoCorasickMatch { id, mut mat } = lexer.aho_corasick(&MATCHER)?;
         match PATTERNS[id].0 {
             TokenType::CommentMultiple => lex_multiple_comment(lexer)?,
-            TokenType::CommentSingle => lex_single_comment(lexer)?,
+            TokenType::CommentSingle => {
+                // The lexer consumes the line terminator at the end of the comment, so any following syntax is technically preceded by at least one line terminator.
+                preceded_by_line_terminator = true;
+                lex_single_comment(lexer)?
+            }
             pat => {
                 return match pat {
                     TokenType::Identifier => lex_identifier(lexer, preceded_by_line_terminator),
