@@ -4,7 +4,7 @@ description = "Extremely fast JS minifier"
 edition = "2021"
 name = "minify-js-cli"
 publish = false
-version = "0.1.3"
+version = "0.1.4"
 
 [dependencies]
 minify-js = { path = "../rust" }
