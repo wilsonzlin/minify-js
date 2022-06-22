@@ -90,6 +90,7 @@ pub fn parse_decl_function(
     syntax: &ParsePatternSyntax,
 ) -> SyntaxResult<NodeId> {
     let fn_scope = parser.create_child_scope(scope, ScopeType::Closure);
+    let is_async = parser.consume_if(TokenType::KeywordAsync)?.is_match();
     let start = parser.require(TokenType::KeywordFunction)?.loc().clone();
     let generator = parser.consume_if(TokenType::Asterisk)?.is_match();
     // WARNING: The name belongs in the containing scope, not the function's scope.
@@ -114,6 +115,7 @@ pub fn parse_decl_function(
         scope,
         &start + parser[body].loc(),
         Syntax::FunctionDecl {
+            is_async,
             generator,
             name: name_node,
             signature,

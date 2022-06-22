@@ -287,6 +287,7 @@ pub enum Syntax {
     },
     FunctionDecl {
         generator: bool,
+        is_async: bool,
         name: NodeId,
         signature: NodeId,
         body: Statement,
@@ -303,6 +304,7 @@ pub enum Syntax {
 
     // Expressions.
     ArrowFunctionExpr {
+        is_async: bool,
         signature: NodeId,
         body: NodeId,
     },
@@ -337,6 +339,7 @@ pub enum Syntax {
     },
     FunctionExpr {
         parenthesised: bool,
+        is_async: bool,
         generator: bool,
         name: Option<NodeId>,
         signature: NodeId,

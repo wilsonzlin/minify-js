@@ -136,7 +136,9 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
                 visit_node(s, m, updates, *r);
             };
         }
-        Syntax::ArrowFunctionExpr { signature, body } => {
+        Syntax::ArrowFunctionExpr {
+            signature, body, ..
+        } => {
             visit_node(s, m, updates, *signature);
             visit_node(s, m, updates, *body);
         }

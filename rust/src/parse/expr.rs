@@ -279,6 +279,80 @@ pub fn parse_expr_object(
     ))
 }
 
+pub fn parse_expr_arrow_function(
+    scope: ScopeId,
+    parser: &mut Parser,
+    terminator_a: TokenType,
+    terminator_b: TokenType,
+    syntax: &ParsePatternSyntax,
+) -> SyntaxResult<NodeId> {
+    let fn_scope = parser.create_child_scope(scope, ScopeType::Closure);
+
+    let is_async = parser.consume_if(TokenType::KeywordAsync)?.is_match();
+
+    let (signature, arrow) = if !is_async
+        && is_valid_pattern_identifier(
+            parser.peek()?.typ(),
+            &ParsePatternSyntax {
+                async_allowed: syntax.async_allowed,
+                await_allowed: false,
+                yield_allowed: syntax.yield_allowed,
+            },
+        ) {
+        // Single-unparenthesised-parameter arrow function.
+        // Parse arrow first for fast fail (and in case we are merely trying to parse as arrow function), before we mutate state by creating nodes and adding symbols.
+        let param_name = parser.next()?.loc_take();
+        let arrow = parser.require(TokenType::EqualsChevronRight)?;
+        let pattern = parser.create_node(
+            fn_scope,
+            param_name.clone(),
+            Syntax::IdentifierPattern {
+                name: param_name.clone(),
+            },
+        );
+        parser[fn_scope].add_block_symbol(param_name.clone(), Symbol::new(pattern))?;
+        let param = parser.create_node(
+            scope,
+            param_name.clone(),
+            Syntax::ParamDecl {
+                rest: false,
+                pattern,
+                default_value: None,
+            },
+        );
+        let signature = parser.create_node(
+            scope,
+            param_name.clone(),
+            Syntax::FunctionSignature {
+                parameters: vec![param],
+            },
+        );
+        (signature, arrow)
+    } else {
+        let signature = parse_signature_function(fn_scope, parser, syntax)?;
+        let arrow = parser.require(TokenType::EqualsChevronRight)?;
+        (signature, arrow)
+    };
+
+    if arrow.preceded_by_line_terminator() {
+        // Illegal under Automatic Semicolon Insertion rules.
+        return Err(arrow.error(SyntaxErrorType::LineTerminatorAfterArrowFunctionParameters));
+    }
+    let body = match parser.peek()?.typ() {
+        TokenType::BraceOpen => parse_stmt(fn_scope, parser, syntax)?,
+        _ => parse_expr_until_either(fn_scope, parser, terminator_a, terminator_b, syntax)?,
+    };
+    Ok(parser.create_node(
+        scope,
+        parser[signature].loc() + parser[body].loc(),
+        Syntax::ArrowFunctionExpr {
+            is_async,
+            signature,
+            body,
+        },
+    ))
+}
+
 pub fn parse_expr_arrow_function_or_grouping(
     scope: ScopeId,
     parser: &mut Parser,
@@ -299,34 +373,16 @@ pub fn parse_expr_arrow_function_or_grouping(
 
     let cp = parser.checkpoint();
 
-    let fn_scope = parser.create_child_scope(scope, ScopeType::Closure);
-
-    let signature = match parse_signature_function(fn_scope, parser, syntax).and_then(|sig| {
-        let arrow = parser.require(TokenType::EqualsChevronRight)?;
-        if arrow.preceded_by_line_terminator() {
-            // Illegal under Automatic Semicolon Insertion rules.
-            return Err(arrow.error(SyntaxErrorType::LineTerminatorAfterArrowFunctionParameters));
-        }
-        Ok(sig)
-    }) {
-        Ok(sig) => sig,
+    match parse_expr_arrow_function(scope, parser, terminator_a, terminator_b, syntax) {
+        Ok(expr) => Ok(expr),
         Err(err) if err.typ() == SyntaxErrorType::LineTerminatorAfterArrowFunctionParameters => {
-            return Err(err.clone())
+            Err(err)
         }
         Err(_) => {
             parser.restore_checkpoint(cp);
-            return parse_grouping(scope, parser, asi, syntax);
+            parse_grouping(scope, parser, asi, syntax)
         }
-    };
-    let body = match parser.peek()?.typ() {
-        TokenType::BraceOpen => parse_stmt(fn_scope, parser, syntax)?,
-        _ => parse_expr_until_either(fn_scope, parser, terminator_a, terminator_b, syntax)?,
-    };
-    Ok(parser.create_node(
-        scope,
-        parser[signature].loc() + parser[body].loc(),
-        Syntax::ArrowFunctionExpr { signature, body },
-    ))
+    }
 }
 
 pub fn parse_expr_import(
@@ -352,6 +408,7 @@ pub fn parse_expr_function(
     syntax: &ParsePatternSyntax,
 ) -> SyntaxResult<NodeId> {
     let fn_scope = parser.create_child_scope(scope, ScopeType::Closure);
+    let is_async = parser.consume_if(TokenType::KeywordAsync)?.is_match();
     let start = parser.require(TokenType::KeywordFunction)?.loc().clone();
     let generator = parser.consume_if(TokenType::Asterisk)?.is_match();
     // WARNING: Unlike function declarations, function expressions are not declared within their current closure or block. However, their names cannot be assigned to within the function (it has no effect) and they can be "redeclared" e.g. `(function a() { let a = 1; })()`.
@@ -377,6 +434,7 @@ pub fn parse_expr_function(
         &start + parser[body].loc(),
         Syntax::FunctionExpr {
             parenthesised: false,
+            is_async,
             generator,
             name,
             signature,
@@ -484,52 +542,8 @@ fn parse_expr_operand(
             {
                 if parser.peek()?.typ() == TokenType::EqualsChevronRight {
                     // Single-unparenthesised-parameter arrow function.
-                    let fn_scope = parser.create_child_scope(scope, ScopeType::Closure);
-                    let pattern = parser.create_node(
-                        fn_scope,
-                        t.loc().clone(),
-                        Syntax::IdentifierPattern {
-                            name: t.loc().clone(),
-                        },
-                    );
-                    parser[fn_scope].add_block_symbol(t.loc().clone(), Symbol::new(pattern))?;
-                    let param = parser.create_node(
-                        scope,
-                        t.loc().clone(),
-                        Syntax::ParamDecl {
-                            rest: false,
-                            pattern,
-                            default_value: None,
-                        },
-                    );
-                    let signature = parser.create_node(
-                        scope,
-                        t.loc().clone(),
-                        Syntax::FunctionSignature {
-                            parameters: vec![param],
-                        },
-                    );
-                    let arrow = parser.next()?;
-                    if arrow.preceded_by_line_terminator() {
-                        // Illegal under Automatic Semicolon Insertion rules.
-                        return Err(arrow
-                            .error(SyntaxErrorType::LineTerminatorAfterArrowFunctionParameters));
-                    };
-                    let body = match parser.peek()?.typ() {
-                        TokenType::BraceOpen => parse_stmt(fn_scope, parser, syntax)?,
-                        _ => parse_expr_until_either(
-                            fn_scope,
-                            parser,
-                            terminator_a,
-                            terminator_b,
-                            syntax,
-                        )?,
-                    };
-                    parser.create_node(
-                        scope,
-                        parser[signature].loc() + parser[body].loc(),
-                        Syntax::ArrowFunctionExpr { signature, body },
-                    )
+                    parser.restore_checkpoint(cp);
+                    parse_expr_arrow_function(scope, parser, terminator_a, terminator_b, syntax)?
                 } else {
                     parser.create_node(
                         scope,
@@ -543,6 +557,15 @@ fn parse_expr_operand(
             TokenType::KeywordClass => {
                 parser.restore_checkpoint(cp);
                 parse_expr_class(scope, parser, syntax)?
+            }
+            TokenType::KeywordAsync => {
+                let is_arrow = parser.peek()?.typ() == TokenType::ParenthesisOpen;
+                parser.restore_checkpoint(cp);
+                if is_arrow {
+                    parse_expr_arrow_function(scope, parser, terminator_a, terminator_b, syntax)?
+                } else {
+                    parse_expr_function(scope, parser, syntax)?
+                }
             }
             TokenType::KeywordFunction => {
                 parser.restore_checkpoint(cp);

@@ -15,6 +15,7 @@
     },
     "consequent": {
       "$t": "ArrowFunctionExpr",
+      "async": false,
       "signature": {
         "$t": "FunctionSignature",
         "parameters": [

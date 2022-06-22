@@ -90,10 +90,7 @@ cmd("git", "pull");
 cmd("cargo", "fmt");
 cmd("cargo", "test");
 
-for (const f of [
-  "rust/Cargo.toml",
-  "cli/Cargo.toml",
-]) {
+for (const f of ["rust/Cargo.toml", "cli/Cargo.toml"]) {
   replaceInFile(
     f,
     /^version = "\d+\.\d+\.\d+"\s*$/m,

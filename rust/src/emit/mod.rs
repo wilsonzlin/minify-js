@@ -388,11 +388,15 @@ fn emit_js_under_operator<T: Write>(
             emit_class(out, map, Some(*name), *extends, members)?;
         }
         Syntax::FunctionDecl {
+            is_async,
             generator,
             name,
             signature,
             body,
         } => {
+            if *is_async {
+                out.write_all(b"async ")?;
+            }
             out.write_all(b"function")?;
             if *generator {
                 out.write_all(b"*")?;
@@ -419,10 +423,18 @@ fn emit_js_under_operator<T: Write>(
                 emit_js(out, map, *v)?;
             }
         }
-        Syntax::ArrowFunctionExpr { signature, body } => {
+        Syntax::ArrowFunctionExpr {
+            is_async,
+            signature,
+            body,
+        } => {
+            if *is_async {
+                out.write_all(b"async")?;
+            }
             let can_omit_parentheses =
                 if let Syntax::FunctionSignature { parameters } = map[*signature].stx() {
-                    parameters.len() == 1
+                    !is_async
+                        && parameters.len() == 1
                         && match map[parameters[0]].stx() {
                             Syntax::ParamDecl {
                                 default_value,
@@ -550,6 +562,7 @@ fn emit_js_under_operator<T: Write>(
         }
         Syntax::FunctionExpr {
             parenthesised,
+            is_async,
             generator,
             name,
             signature,
@@ -559,6 +572,9 @@ fn emit_js_under_operator<T: Write>(
             // TODO Omit parentheses if possible.
             if *parenthesised {
                 out.write_all(b"(")?;
+            }
+            if *is_async {
+                out.write_all(b"async ")?;
             }
             out.write_all(b"function")?;
             if *generator {

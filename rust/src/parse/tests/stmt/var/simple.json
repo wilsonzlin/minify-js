@@ -5,14 +5,14 @@
     "mode": "Let",
     "declarators": [
       {
-        "pattern": {"$t": "IdentifierPattern", "name": "a"},
+        "pattern": { "$t": "IdentifierPattern", "name": "a" },
         "initializer": {
           "$t": "LiteralNumberExpr",
           "value": 1.0
         }
       },
       {
-        "pattern": {"$t": "IdentifierPattern", "name": "b"},
+        "pattern": { "$t": "IdentifierPattern", "name": "b" },
         "initializer": null
       }
     ]

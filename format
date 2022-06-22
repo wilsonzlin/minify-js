@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+set -Eeuxo pipefail
+
+pushd "$(dirname "$0")" >/dev/null
+
+npx prettier@2.3.2 -w 'version' 'rust/src/**/*.json'
+
+cargo fmt
+
+popd >/dev/null

@@ -104,12 +104,14 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
             })).collect::<Vec<_>>(),
         }),
         Syntax::FunctionDecl {
+            is_async,
             generator,
             name,
             signature,
             body,
         } => json!({
             "$t": "FunctionDecl",
+            "async": is_async,
             "generator": generator,
             "name": visit_node(m, *name),
             "signature": visit_node(m, *signature),
@@ -133,8 +135,13 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
                 "initializer": d.initializer.map(|n| visit_node(m, n)),
             })).collect::<Vec<_>>(),
         }),
-        Syntax::ArrowFunctionExpr { signature, body } => json!({
+        Syntax::ArrowFunctionExpr {
+            is_async,
+            signature,
+            body,
+        } => json!({
             "$t": "ArrowFunctionExpr",
+            "async": is_async,
             "signature": visit_node(m, *signature),
             "body": visit_node(m, *body),
         }),
@@ -186,6 +193,7 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
         }),
         Syntax::FunctionExpr {
             parenthesised,
+            is_async,
             generator,
             name,
             signature,
@@ -193,6 +201,7 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
         } => json!({
             "$t": "FunctionExpr",
             "parenthesised": parenthesised,
+            "async": is_async,
             "generator": generator,
             "name": name.as_ref().map(|n| visit_node(m, *n)),
             "signature": visit_node(m, *signature),
