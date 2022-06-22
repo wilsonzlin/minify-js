@@ -57,6 +57,23 @@ minify(code.to_vec(), &mut out).unwrap();
 assert_eq!(out.as_slice(), b"let x=1");
 ```
 
+### Node.js
+
+Install the dependency:
+
+```bash
+npm i @minify-js/node
+```
+
+Call the method:
+
+```typescript
+import {minify} from "@minify-js/node";
+
+const src = Buffer.from("let x = 1;", "utf-8");
+const min = minify(src);
+```
+
 ## In progress
 
 - Combine and reorder declarations.

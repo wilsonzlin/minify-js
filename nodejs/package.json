@@ -1,6 +1,6 @@
 {
   "name": "@minify-js/node",
-  "description": "Extremely fast JS minifier, written in Rust",
+  "description": "Extremely fast JavaScript minifier, written in Rust",
   "main": "index.js",
   "files": [
     "src/**",
