@@ -2,8 +2,6 @@
 
 Extremely fast JavaScript minifier, written in Rust.
 
-Currently usable, but under development, with the goal to be similar in effectiveness to common minifiers including [esbuild](https://github.com/wilsonzlin/esbuild-rs) and [terser](https://github.com/terser/terser). Improvements and suggestions welcome!
-
 ## Goals
 
 - Fully written in Rust for maximum compatibility with Rust programs and derivatives (FFI, WASM, embedded, etc.).
@@ -14,7 +12,7 @@ Currently usable, but under development, with the goal to be similar in effectiv
 ## Features
 
 - Fast parsing powered by SIMD instructions and lookup tables.
-- Minification of variable, parameter, and function names.
+- Minification of identifiers.
 
 ## Usage
 
@@ -28,13 +26,12 @@ minify-js = "0.0.2"
 Call the method:
 
 ```rust
-use std::io::BufWriter;
 use minify_js::minify;
 
 let mut code: &[u8] = b"let x = 1;";
-let mut out = BufWriter::new(Vec::new());
+let mut out = Vec::new();
 minify(code.to_vec(), &mut out).unwrap();
-assert_eq!(out.get_ref().as_slice(), b"let x=1;");
+assert_eq!(out.as_slice(), b"let x=1");
 ```
 
 ## In progress
@@ -49,7 +46,7 @@ assert_eq!(out.get_ref().as_slice(), b"let x=1;");
 - Aliasing of reused well-knowns.
 - Removal of unreachable and redundant code.
 - Aliasing frequently accessed properties and called methods.
-- Better support for non-ASCII syntax.
+- Better support for non-ASCII identifiers.
 - Replacing if statements with conditional and logical expressions.
 - Aliasing repeated identical literal values.
 - Micro-optimisations:
