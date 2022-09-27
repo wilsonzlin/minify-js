@@ -40,11 +40,11 @@ pub enum MinifyError {
 /// # Examples
 ///
 /// ```
-/// use minify_js::minify;
+/// use minify_js::{TopLevelMode, minify};
 ///
 /// let mut code: &[u8] = b"const main = () => { let my_first_variable = 1; };";
 /// let mut out = Vec::new();
-/// minify(code.to_vec(), &mut out).unwrap();
+/// minify(TopLevelMode::Global, code.to_vec(), &mut out).unwrap();
 /// assert_eq!(out.as_slice(), b"const main=()=>{let a=1}");
 /// ```
 pub fn minify<T: Write>(
