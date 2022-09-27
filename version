@@ -91,7 +91,7 @@ cmd("cargo", "fmt");
 cmd("cargo", "test");
 
 for (const f of ["rust/Cargo.toml", "cli/Cargo.toml", "nodejs/Cargo.toml"]) {
-  replaceInFile(f, /^version = "\d+\.\d+\.\d+"/m, `version = "${NEW_VERSION}"`);
+  replaceInFile(f, /^version = "\d+\.\d+\.\d+"/gm, `version = "${NEW_VERSION}"`);
 }
 
 for (const f of ["nodejs/package.json"]) {
