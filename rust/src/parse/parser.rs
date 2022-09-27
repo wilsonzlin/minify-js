@@ -217,7 +217,10 @@ impl Parser {
         self.maybe_with_mode(typ, LexMode::Standard)
     }
 
-    pub fn consume_if_pred<F: FnOnce(&Token) -> bool>(&mut self, pred: F) -> SyntaxResult<MaybeToken> {
+    pub fn consume_if_pred<F: FnOnce(&Token) -> bool>(
+        &mut self,
+        pred: F,
+    ) -> SyntaxResult<MaybeToken> {
         let (matched, t) = self.forward(LexMode::Standard, pred)?;
         Ok(MaybeToken {
             typ: t.typ(),
