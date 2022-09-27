@@ -25,6 +25,7 @@ impl NodeUpdates {
         }
     }
 
+    // To delete a node, replace it with something blank (varies by context). We cannot delete nodes as we don't have backlinks into parents that reference it.
     pub fn replace_node(
         &mut self,
         node_id: NodeId,

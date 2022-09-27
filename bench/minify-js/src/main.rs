@@ -1,4 +1,4 @@
-use minify_js::minify;
+use minify_js::{minify, TopLevelMode};
 use std::{
     env,
     fs::File,
@@ -20,7 +20,7 @@ fn main() {
     let started = Instant::now();
     for _ in 0..iterations {
         output.get_mut().clear();
-        minify(code.to_vec(), &mut output).expect("minify");
+        minify(TopLevelMode::Global, code.to_vec(), &mut output).expect("minify");
         output_len = output.get_ref().len();
     }
     let elapsed_ns = started.elapsed().as_nanos();

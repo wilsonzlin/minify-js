@@ -187,26 +187,26 @@ pub struct ArrayPatternElement {
     pub default_value: Option<Expression>,
 }
 
-#[derive(Eq, PartialEq, Debug)]
-pub enum ImportOrExportName {
-    Default,
-    Name(SourceRange),
+#[derive(Debug)]
+pub struct ExportName {
+    // For simplicity, we always set both fields; for shorthands, both nodes are identical.
+    pub target: SourceRange,
+    // IdentifierPattern.
+    pub alias: Pattern,
 }
 
-#[derive(Eq, PartialEq, Debug)]
-pub enum ImportNames {
-    // `import * as name`.
-    All(SourceRange),
-    // `import {a as b, c, default as e}`.
-    Specific(Vec<(ImportOrExportName, Option<SourceRange>)>),
-}
-
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Debug)]
 pub enum ExportNames {
-    // `export * from "module"`.
-    All,
-    // `export {a as default, b as c, d}`, `export {default, a as b, c} from "module"`.
-    Specific(Vec<(ImportOrExportName, Option<ImportOrExportName>)>),
+    // `import * as name`
+    // `export * from "module"`
+    // `export * as name from "module"`
+    // IdentifierPattern.
+    All(Option<Pattern>),
+    // `import {a as b, c, default as e}`
+    // `export {a as default, b as c, d}`
+    // `export {default, a as b, c} from "module"`
+    // `default` is still a name, so we don't use an enum.
+    Specific(Vec<ExportName>),
 }
 
 #[derive(Debug)]
@@ -412,7 +412,7 @@ pub enum Syntax {
     ExportDeclStmt {
         declaration: Declaration,
     },
-    ExportDefaultStmt {
+    ExportDefaultExprStmt {
         expression: Expression,
     },
     ExportListStmt {
@@ -428,8 +428,9 @@ pub enum Syntax {
         alternate: Option<Statement>,
     },
     ImportStmt {
-        default: Option<SourceRange>,
-        names: Option<ImportNames>,
+        // IdentifierPattern.
+        default: Option<Pattern>,
+        names: Option<ExportNames>,
         module: String,
     },
     ForStmt {
@@ -483,6 +484,7 @@ pub enum Syntax {
     ObjectPatternProperty {
         key: ClassOrObjectMemberKey,
         // Omitted if shorthand i.e. key is Direct and target is IdentifierPattern of same name.
+        // TODO Ideally for simplicity this should be duplicated from `key` if shorthand, with a `shorthand` boolean field to indicate so.
         target: Option<Pattern>,
         default_value: Option<Expression>,
     },

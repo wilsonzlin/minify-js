@@ -1,6 +1,5 @@
 use crate::ast::{
-    ExportNames, ForInOfStmtHeaderLhs, ForStmtHeader, ForThreeInit, ImportNames,
-    ImportOrExportName, NodeId, Syntax,
+    ExportName, ExportNames, ForInOfStmtHeaderLhs, ForStmtHeader, ForThreeInit, NodeId, Syntax,
 };
 use crate::error::{SyntaxErrorType, SyntaxResult};
 use crate::parse::decl::{parse_decl_function, parse_decl_var};
@@ -9,21 +8,52 @@ use crate::parse::literal::parse_and_normalise_literal_string;
 use crate::parse::parser::Parser;
 use crate::parse::pattern::{parse_pattern, ParsePatternAction};
 use crate::source::SourceRange;
-use crate::symbol::{ScopeId, ScopeType};
+use crate::symbol::{ScopeId, ScopeType, Symbol};
 use crate::token::TokenType;
 
 use super::decl::{parse_decl_class, VarDeclParseMode};
 use super::expr::{parse_expr_with_asi, Asi};
 use super::pattern::{is_valid_pattern_identifier, ParsePatternSyntax};
 
-fn parse_import_or_export_name(parser: &mut Parser) -> SyntaxResult<ImportOrExportName> {
-    Ok(
-        if parser.consume_if(TokenType::KeywordDefault)?.is_match() {
-            ImportOrExportName::Default
-        } else {
-            ImportOrExportName::Name(parser.require(TokenType::Identifier)?.loc().clone())
+// Parses `a`, `a as b`, `default as b`. Creates the symbol if importing.
+fn parse_import_or_export_name(
+    scope: ScopeId,
+    parser: &mut Parser,
+    add_to_scope: bool,
+) -> SyntaxResult<ExportName> {
+    let (target, alias) = match parser
+        .consume_if(TokenType::KeywordDefault)?
+        .match_loc_take()
+    {
+        Some(target) => {
+            parser.require(TokenType::KeywordAs)?;
+            let alias = parser.require(TokenType::Identifier)?.loc().clone();
+            (target, alias)
+        }
+        None => {
+            let target = parser.require(TokenType::Identifier)?.loc().clone();
+            let alias = if parser.consume_if(TokenType::KeywordAs)?.is_match() {
+                parser.require(TokenType::Identifier)?.loc().clone()
+            } else {
+                target.clone()
+            };
+            (target, alias)
+        }
+    };
+    let alias_node = parser.create_node(
+        scope,
+        alias.clone(),
+        Syntax::IdentifierPattern {
+            name: alias.clone(),
         },
-    )
+    );
+    if add_to_scope {
+        parser[scope].add_symbol(alias.clone(), Symbol::new(alias_node))?;
+    };
+    Ok(ExportName {
+        target,
+        alias: alias_node,
+    })
 }
 
 pub fn parse_stmt(
@@ -167,26 +197,26 @@ pub fn parse_stmt_debugger(scope: ScopeId, parser: &mut Parser) -> SyntaxResult<
     Ok(parser.create_node(scope, loc, Syntax::DebuggerStmt {}))
 }
 
+// https://tc39.es/ecma262/#sec-exports
+// https://jakearchibald.com/2021/export-default-thing-vs-thing-as-default/
 pub fn parse_stmt_export(
     scope: ScopeId,
     parser: &mut Parser,
     syntax: &ParsePatternSyntax,
 ) -> SyntaxResult<NodeId> {
+    // TODO Ensure top-level.
     let start = parser.require(TokenType::KeywordExport)?;
     let cp = parser.checkpoint();
     let t = parser.next()?;
     Ok(match t.typ() {
         TokenType::BraceOpen => {
-            let mut names = Vec::<(ImportOrExportName, Option<ImportOrExportName>)>::new();
+            let mut names = Vec::<ExportName>::new();
             loop {
                 if parser.consume_if(TokenType::BraceClose)?.is_match() {
                     break;
                 };
-                let name = parse_import_or_export_name(parser)?;
-                let alias = parser
-                    .consume_if(TokenType::KeywordAs)?
-                    .and_then(|| parse_import_or_export_name(parser))?;
-                names.push((name, alias));
+                let name = parse_import_or_export_name(scope, parser, false)?;
+                names.push(name);
                 if !parser.consume_if(TokenType::Comma)?.is_match() {
                     parser.require(TokenType::BraceClose)?;
                     break;
@@ -207,6 +237,20 @@ pub fn parse_stmt_export(
             )
         }
         TokenType::Asterisk => {
+            let alias = if parser.consume_if(TokenType::KeywordAs)?.is_match() {
+                let alias = parser.require(TokenType::Identifier)?.loc().clone();
+                let alias_node = parser.create_node(
+                    scope,
+                    alias.clone(),
+                    Syntax::IdentifierPattern {
+                        name: alias.clone(),
+                    },
+                );
+                Some(alias_node)
+                // We don't need to add the symbol as it's not exposed within the module's scope.
+            } else {
+                None
+            };
             parser.require(TokenType::KeywordFrom)?;
             let from = parse_and_normalise_literal_string(parser)?;
             // TODO Loc
@@ -214,20 +258,32 @@ pub fn parse_stmt_export(
                 scope,
                 start.loc().clone(),
                 Syntax::ExportListStmt {
-                    names: ExportNames::All,
+                    names: ExportNames::All(alias),
                     from: Some(from),
                 },
             )
         }
-        TokenType::KeywordDefault => {
-            let expression = parse_expr(scope, parser, TokenType::Semicolon, syntax)?;
-            parser.create_node(
-                scope,
-                start.loc() + parser[expression].loc(),
-                Syntax::ExportDefaultStmt { expression },
-            )
-        }
-        TokenType::KeywordLet
+        TokenType::KeywordDefault => match parser.peek()?.typ() {
+            // `class` and `function` are treated as statements that are hoisted, not expressions; however, they can be unnamed, which gives them the name `default`.
+            TokenType::KeywordClass | TokenType::KeywordFunction => {
+                let declaration = parse_stmt(scope, parser, syntax)?;
+                parser.create_node(
+                    scope,
+                    start.loc() + parser[declaration].loc(),
+                    Syntax::ExportDeclStmt { declaration },
+                )
+            }
+            _ => {
+                let expression = parse_expr(scope, parser, TokenType::Semicolon, syntax)?;
+                parser.create_node(
+                    scope,
+                    start.loc() + parser[expression].loc(),
+                    Syntax::ExportDefaultExprStmt { expression },
+                )
+            }
+        },
+        TokenType::KeywordVar
+        | TokenType::KeywordLet
         | TokenType::KeywordConst
         | TokenType::KeywordFunction
         | TokenType::KeywordClass => {
@@ -429,10 +485,20 @@ pub fn parse_stmt_import_or_expr_import(
         return parse_stmt_expression(scope, parser, syntax);
     };
 
+    // TODO Ensure top-level.
+
     let (default, can_have_names) =
-        if let Some(default) = parser.consume_if(TokenType::Identifier)?.match_loc() {
+        if let Some(alias) = parser.consume_if(TokenType::Identifier)?.match_loc() {
+            let alias_node = parser.create_node(
+                scope,
+                alias.clone(),
+                Syntax::IdentifierPattern {
+                    name: alias.clone(),
+                },
+            );
+            parser[scope].add_symbol(alias.clone(), Symbol::new(alias_node))?;
             (
-                Some(default.clone()),
+                Some(alias_node),
                 parser.consume_if(TokenType::Comma)?.is_match(),
             )
         } else {
@@ -442,26 +508,28 @@ pub fn parse_stmt_import_or_expr_import(
         None
     } else if parser.consume_if(TokenType::Asterisk)?.is_match() {
         parser.require(TokenType::KeywordAs)?;
-        Some(ImportNames::All(
-            parser.require(TokenType::Identifier)?.loc().clone(),
-        ))
+        let alias = parser.require(TokenType::Identifier)?.loc().clone();
+        let alias_node = parser.create_node(
+            scope,
+            alias.clone(),
+            Syntax::IdentifierPattern {
+                name: alias.clone(),
+            },
+        );
+        parser[scope].add_symbol(alias.clone(), Symbol::new(alias_node))?;
+        Some(ExportNames::All(Some(alias_node)))
     } else {
         parser.require(TokenType::BraceOpen)?;
-        let mut names = Vec::<(ImportOrExportName, Option<SourceRange>)>::new();
+        let mut names = Vec::<ExportName>::new();
         while !parser.consume_if(TokenType::BraceClose)?.is_match() {
-            let name = parse_import_or_export_name(parser)?;
-            let alias = if parser.consume_if(TokenType::KeywordAs)?.is_match() {
-                Some(parser.require(TokenType::Identifier)?.loc().clone())
-            } else {
-                None
-            };
-            names.push((name, alias));
+            let name = parse_import_or_export_name(scope, parser, true)?;
+            names.push(name);
             if !parser.consume_if(TokenType::Comma)?.is_match() {
                 break;
             };
         }
         parser.require(TokenType::BraceClose)?;
-        Some(ImportNames::Specific(names))
+        Some(ExportNames::Specific(names))
     };
     parser.require(TokenType::KeywordFrom)?;
     let module = parse_and_normalise_literal_string(parser)?;

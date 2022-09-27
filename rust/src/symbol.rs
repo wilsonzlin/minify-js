@@ -53,9 +53,14 @@ pub struct ScopeData {
     // Does not exist for top-level.
     parent: Option<ScopeId>,
     typ: ScopeType,
+    is_module_closure: bool,
 }
 
 impl ScopeData {
+    pub fn is_module_closure(&self) -> bool {
+        self.is_module_closure
+    }
+
     pub fn self_or_ancestor_closure(&self) -> Option<ScopeId> {
         if self.typ == ScopeType::Closure {
             Some(self.id)
@@ -135,6 +140,7 @@ impl ScopeMap {
         ancestor_closure: Option<ScopeId>,
         parent: Option<ScopeId>,
         typ: ScopeType,
+        is_module_closure: bool,
     ) -> ScopeId {
         let id = ScopeId(self.scopes.len());
         self.scopes.push(ScopeData {
@@ -144,6 +150,7 @@ impl ScopeMap {
             ancestor_closure,
             parent,
             typ,
+            is_module_closure,
         });
         id
     }

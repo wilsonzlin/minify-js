@@ -16,6 +16,16 @@ pub struct SourceRange {
 }
 
 impl SourceRange {
+    pub fn anonymous<T: Into<Vec<u8>>>(code: T) -> SourceRange {
+        let code = code.into();
+        let end = code.len();
+        SourceRange {
+            source: Source::new(code),
+            start: 0,
+            end,
+        }
+    }
+
     pub fn is_eof(&self) -> bool {
         self.start >= self.source.code().len()
     }

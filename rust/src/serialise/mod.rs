@@ -313,7 +313,7 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
             "$t": "ExportDeclStmt",
             "declaration": visit_node(m, *declaration),
         }),
-        Syntax::ExportDefaultStmt { expression } => json!({
+        Syntax::ExportDefaultExprStmt { expression } => json!({
             "$t": "ExportDefaultStmt",
             "expression": visit_node(m, *expression),
         }),

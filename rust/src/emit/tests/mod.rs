@@ -5,13 +5,19 @@ use crate::lex::Lexer;
 use crate::minify::minify_js;
 use crate::parse::parser::Parser;
 use crate::parse::toplevel::parse_top_level;
+use crate::TopLevelMode;
 
-fn check(src: &str, expected: &str) -> () {
+fn check(top_level_mode: TopLevelMode, src: &str, expected: &str) -> () {
     let mut parser = Parser::new(Lexer::new(src.as_bytes().to_vec()));
-    let p = parse_top_level(&mut parser).unwrap();
+    let p = parse_top_level(&mut parser, top_level_mode).unwrap();
     let mut out = BufWriter::new(Vec::new());
     let (mut node_map, mut scope_map) = parser.take();
-    minify_js(&mut scope_map, &mut node_map, p.top_level_node_id);
+    minify_js(
+        &mut scope_map,
+        &mut node_map,
+        p.top_level_scope_id,
+        p.top_level_node_id,
+    );
     emit_js(&mut out, &mut node_map, p.top_level_node_id).unwrap();
     assert_eq!(
         unsafe { std::str::from_utf8_unchecked(out.get_ref().as_slice()) },
@@ -20,8 +26,9 @@ fn check(src: &str, expected: &str) -> () {
 }
 
 #[test]
-fn test_emit() {
+fn test_emit_global() {
     check(
+        TopLevelMode::Global,
         r#"
           /* Test code */
           function * gen () {
@@ -62,6 +69,48 @@ fn test_emit() {
         const i=({})=>{};\
         const j=l=>{},k=(1/7)/(2/7)\
         }()\
+        ",
+    )
+}
+
+#[test]
+fn test_emit_module() {
+    check(
+        TopLevelMode::Module,
+        r#"
+          import React, {
+            useState as reactUseState,
+            useEffect as reactUseEffect,
+            createElement,
+            memo as reactMemo
+          } from "react";
+          import {default as ReactDOM} from "react-dom";
+
+          const x = 1;
+
+          export const {meaning} = {meaning: 42}, life = 10;
+          console.log("meaning", meaning);
+
+          export default 1;
+          console.log(life);
+
+          ReactDOM.hello();
+
+          export {
+            reactUseState as use_state,
+            reactUseEffect,
+          };
+        "#,
+        "\
+        import a,{useState as b,useEffect as c,createElement as d,memo as e}from\"react\";\
+        import{default as f}from\"react-dom\";\
+        const g=1;\
+        const {meaning:h}={meaning:42},i=10;\
+        console.log(\"meaning\",h);\
+        export default 1;\
+        console.log(i);\
+        f.hello();\
+        export{h as meaning,i as life,b as use_state,c as reactUseEffect}\
         ",
     )
 }

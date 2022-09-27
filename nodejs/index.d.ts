@@ -4,4 +4,4 @@
  * @param src - Source JS code
  * @returns Minified JS code
  */
-export function minify(src: Buffer): Buffer;
+export function minify(topLevelType: "global" | "module", src: Buffer): Buffer;

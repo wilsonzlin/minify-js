@@ -22,6 +22,8 @@ mod token;
 mod update;
 mod util;
 
+pub use parse::toplevel::TopLevelMode;
+
 #[derive(Debug)]
 pub enum MinifyError {
     Syntax(SyntaxError),
@@ -45,12 +47,22 @@ pub enum MinifyError {
 /// minify(code.to_vec(), &mut out).unwrap();
 /// assert_eq!(out.as_slice(), b"const main=()=>{let a=1}");
 /// ```
-pub fn minify<T: Write>(source: Vec<u8>, output: &mut T) -> Result<(), MinifyError> {
+pub fn minify<T: Write>(
+    top_level_mode: TopLevelMode,
+    source: Vec<u8>,
+    output: &mut T,
+) -> Result<(), MinifyError> {
     let lexer = Lexer::new(source);
     let mut parser = Parser::new(lexer);
-    let parsed = parse_top_level(&mut parser).map_err(|err| MinifyError::Syntax(err))?;
+    let parsed =
+        parse_top_level(&mut parser, top_level_mode).map_err(|err| MinifyError::Syntax(err))?;
     let (mut node_map, mut scope_map) = parser.take();
-    minify_js(&mut scope_map, &mut node_map, parsed.top_level_node_id);
+    minify_js(
+        &mut scope_map,
+        &mut node_map,
+        parsed.top_level_scope_id,
+        parsed.top_level_node_id,
+    );
     emit_js(output, &node_map, parsed.top_level_node_id).map_err(|err| MinifyError::IO(err))?;
     Ok(())
 }

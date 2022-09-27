@@ -77,12 +77,15 @@ const min = minify(src);
 ## In progress
 
 - Combine and reorder declarations.
-- Minify import and export syntax.
 - Evaluation and folding of constant expressions.
 - Parse and erase TypeScript syntax.
 - Removal of unreachable, unused, and redundant code.
 - Inlining single-use declarations.
 - Replacing if statements with conditional and logical expressions.
+- Returning an explicit error on illegal code e.g. multiple declarations/exports with identical names.
+- Much more inline, high level, and usage documentation.
+- Support import and export string names e.g. `import { "a-b" as "c-d" } from "x"`.
+- Simplify pattern parsing and minification.
 - Micro-optimisations:
   - Unwrap string literal computed members, then identifier or number string members.
   - Replace `x === null || x === undefined` with `x == null`, where `x` is side-effect free.

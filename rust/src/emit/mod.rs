@@ -1,5 +1,5 @@
 use crate::ast::{
-    ArrayElement, ClassMember, ClassOrObjectMemberKey, ClassOrObjectMemberValue,
+    ArrayElement, ClassMember, ClassOrObjectMemberKey, ClassOrObjectMemberValue, ExportNames,
     ForInOfStmtHeaderLhs, ForStmtHeader, ForThreeInit, LiteralTemplatePart, NodeId, NodeMap,
     ObjectMemberType, Syntax, VarDeclMode,
 };
@@ -196,6 +196,47 @@ fn emit_class<T: Write>(
         last_member_was_property = emit_class_or_object_member(out, map, &m.key, &m.value, b"=")?;
     }
     out.write_all(b"}")?;
+    Ok(())
+}
+
+fn emit_import_or_export_statement_trailer<T: Write>(
+    out: &mut T,
+    m: &NodeMap,
+    names: Option<&ExportNames>,
+    from: Option<&String>,
+) -> io::Result<()> {
+    match names {
+        Some(ExportNames::All(alias)) => {
+            out.write_all(b"*")?;
+            if let Some(alias) = alias {
+                out.write_all(b"as ")?;
+                emit_js(out, m, *alias)?;
+                if from.is_some() {
+                    out.write_all(b" ")?;
+                }
+            };
+        }
+        Some(ExportNames::Specific(names)) => {
+            out.write_all(b"{")?;
+            for (i, e) in names.iter().enumerate() {
+                if i > 0 {
+                    out.write_all(b",")?;
+                }
+                out.write_all(e.target.as_slice())?;
+                // TODO Omit if identical to `target`.
+                out.write_all(b" as ")?;
+                emit_js(out, m, e.alias)?;
+            }
+            out.write_all(b"}")?;
+        }
+        None => {}
+    };
+    if let Some(from) = from {
+        out.write_all(b"from\"")?;
+        // TODO Escape?
+        out.write_all(from.as_bytes())?;
+        out.write_all(b"\"")?;
+    };
     Ok(())
 }
 
@@ -722,9 +763,18 @@ fn emit_js_under_operator<T: Write>(
             emit_js(out, map, *member)?;
             out.write_all(b"]")?;
         }
-        Syntax::ExportDeclStmt { declaration } => todo!(),
-        Syntax::ExportDefaultStmt { expression } => todo!(),
-        Syntax::ExportListStmt { names, from } => todo!(),
+        // We split all `export class/function` into a declaration and an export at the end, so drop the `export`.
+        Syntax::ExportDeclStmt { declaration } => {
+            emit_js(out, map, *declaration)?;
+        }
+        Syntax::ExportDefaultExprStmt { expression } => {
+            out.write_all(b"export default ")?;
+            emit_js(out, map, *expression)?;
+        }
+        Syntax::ExportListStmt { names, from } => {
+            out.write_all(b"export")?;
+            emit_import_or_export_statement_trailer(out, map, Some(names), from.as_ref())?;
+        }
         Syntax::ExpressionStmt { expression } => {
             emit_js(out, map, *expression)?;
         }
@@ -796,7 +846,17 @@ fn emit_js_under_operator<T: Write>(
             default,
             names,
             module,
-        } => todo!(),
+        } => {
+            out.write_all(b"import")?;
+            if let Some(default) = default {
+                out.write_all(b" ")?;
+                emit_js(out, map, *default)?;
+                if names.is_some() {
+                    out.write_all(b",")?;
+                };
+            };
+            emit_import_or_export_statement_trailer(out, map, names.as_ref(), Some(module))?;
+        }
         Syntax::ReturnStmt { value } => {
             out.write_all(b"return")?;
             if let Some(value) = value {

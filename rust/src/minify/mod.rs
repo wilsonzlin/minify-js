@@ -1,13 +1,13 @@
 use crate::{
     ast::{
-        ArrayElement, ClassOrObjectMemberKey, ClassOrObjectMemberValue, ForInOfStmtHeaderLhs,
-        ForStmtHeader, ForThreeInit, LiteralTemplatePart, NodeId, NodeMap, ObjectMemberType,
-        Syntax,
+        ArrayElement, ClassOrObjectMemberKey, ClassOrObjectMemberValue, ExportName, ExportNames,
+        ForInOfStmtHeaderLhs, ForStmtHeader, ForThreeInit, LiteralTemplatePart, NodeId, NodeMap,
+        ObjectMemberType, Syntax,
     },
     char::{ID_CONTINUE_CHARSTR, ID_START_CHARSTR},
     lex::KEYWORD_STRS,
-    source::{Source, SourceRange},
-    symbol::ScopeMap,
+    source::SourceRange,
+    symbol::{ScopeId, ScopeMap},
     update::NodeUpdates,
 };
 
@@ -39,56 +39,97 @@ fn generate_minified_name(mut id: usize) -> SourceRange {
         let s = ALT_MINIFIED_NAMES[*alt_id].encode_utf8(&mut name).len();
         name.truncate(s);
     };
-    let end = name.len();
-    SourceRange {
-        source: Source::new(name),
-        start: 0,
-        end,
-    }
+    SourceRange::anonymous(name)
 }
 
-fn visit_class_or_object_key(
-    s: &ScopeMap,
-    m: &NodeMap,
-    updates: &mut NodeUpdates,
-    key: &ClassOrObjectMemberKey,
-) -> () {
+struct ExportBinding {
+    target: SourceRange,
+    alias: SourceRange,
+}
+
+struct VisitorCtx<'a> {
+    scopes: &'a ScopeMap,
+    nodes: &'a NodeMap,
+    updates: &'a mut NodeUpdates,
+    // Exports with the same exported name (including multiple default exports) are illegal, so we don't have to worry about/handle that case.
+    export_bindings: &'a mut Vec<ExportBinding>,
+}
+
+fn visit_class_or_object_key(ctx: &mut VisitorCtx, key: &ClassOrObjectMemberKey) -> () {
     match key {
         ClassOrObjectMemberKey::Direct(_) => {}
-        ClassOrObjectMemberKey::Computed(e) => visit_node(s, m, updates, *e),
+        ClassOrObjectMemberKey::Computed(e) => visit_node(ctx, *e),
     };
 }
 
-fn visit_class_or_object_value(
-    s: &ScopeMap,
-    m: &NodeMap,
-    updates: &mut NodeUpdates,
-    value: &ClassOrObjectMemberValue,
-) -> () {
+fn visit_class_or_object_value(ctx: &mut VisitorCtx, value: &ClassOrObjectMemberValue) -> () {
     match value {
-        ClassOrObjectMemberValue::Getter { body } => visit_node(s, m, updates, *body),
+        ClassOrObjectMemberValue::Getter { body } => visit_node(ctx, *body),
         ClassOrObjectMemberValue::Method {
             signature, body, ..
         } => {
-            visit_node(s, m, updates, *signature);
-            visit_node(s, m, updates, *body);
+            visit_node(ctx, *signature);
+            visit_node(ctx, *body);
         }
         ClassOrObjectMemberValue::Property { initializer } => {
             if let Some(initializer) = initializer {
-                visit_node(s, m, updates, *initializer);
+                visit_node(ctx, *initializer);
             };
         }
         ClassOrObjectMemberValue::Setter { body, parameter } => {
-            visit_node(s, m, updates, *parameter);
-            visit_node(s, m, updates, *body);
+            visit_node(ctx, *parameter);
+            visit_node(ctx, *body);
         }
     }
 }
 
-fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -> () {
-    let scope_id = m[n].scope();
-    let scope = &s[scope_id];
-    match m[n].stx() {
+fn visit_exported_pattern(ctx: &mut VisitorCtx, n: NodeId) -> () {
+    match ctx.nodes[n].stx() {
+        Syntax::ArrayPattern { elements, rest } => {
+            for e in elements {
+                if let Some(e) = e {
+                    visit_exported_pattern(ctx, e.target);
+                }
+            }
+            if let Some(rest) = rest {
+                visit_exported_pattern(ctx, *rest);
+            }
+        }
+        Syntax::ObjectPattern { properties, rest } => {
+            for p in properties {
+                visit_exported_pattern(ctx, *p);
+            }
+            if let Some(rest) = rest {
+                visit_exported_pattern(ctx, *rest);
+            }
+        }
+        Syntax::ObjectPatternProperty { key, target, .. } => {
+            match target {
+                Some(target) => visit_exported_pattern(ctx, *target),
+                // Shorthand.
+                None => match key {
+                    ClassOrObjectMemberKey::Direct(key) => {
+                        ctx.export_bindings.push(ExportBinding {
+                            target: key.clone(),
+                            alias: key.clone(),
+                        })
+                    }
+                    _ => unreachable!(),
+                },
+            }
+        }
+        Syntax::IdentifierPattern { name } => ctx.export_bindings.push(ExportBinding {
+            target: name.clone(),
+            alias: name.clone(),
+        }),
+        _ => unreachable!(),
+    }
+}
+
+fn visit_node(ctx: &mut VisitorCtx, n: NodeId) -> () {
+    let scope_id = ctx.nodes[n].scope();
+    let scope = &ctx.scopes[scope_id];
+    match ctx.nodes[n].stx() {
         Syntax::FunctionExpr {
             name,
             signature,
@@ -96,18 +137,18 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
             ..
         } => {
             if let Some(name) = name {
-                visit_node(s, m, updates, *name);
+                visit_node(ctx, *name);
             };
-            visit_node(s, m, updates, *signature);
-            visit_node(s, m, updates, *body);
+            visit_node(ctx, *signature);
+            visit_node(ctx, *body);
         }
         stx @ (Syntax::IdentifierPattern { name }
         | Syntax::IdentifierExpr { name }
         | Syntax::ClassOrFunctionName { name }) => {
-            let sym = scope.find_symbol(s, name);
+            let sym = scope.find_symbol(ctx.scopes, name);
             if let Some(sym) = sym {
                 let minified = generate_minified_name(sym.minified_name_id());
-                updates.replace_node(
+                ctx.updates.replace_node(
                     n,
                     scope_id,
                     minified.clone(),
@@ -129,55 +170,55 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
         Syntax::ArrayPattern { elements, rest } => {
             for e in elements {
                 if let Some(e) = e {
-                    visit_node(s, m, updates, e.target);
+                    visit_node(ctx, e.target);
                 };
             }
             if let Some(r) = rest {
-                visit_node(s, m, updates, *r);
+                visit_node(ctx, *r);
             };
         }
         Syntax::ArrowFunctionExpr {
             signature, body, ..
         } => {
-            visit_node(s, m, updates, *signature);
-            visit_node(s, m, updates, *body);
+            visit_node(ctx, *signature);
+            visit_node(ctx, *body);
         }
         Syntax::BinaryExpr { left, right, .. } => {
-            visit_node(s, m, updates, *left);
-            visit_node(s, m, updates, *right);
+            visit_node(ctx, *left);
+            visit_node(ctx, *right);
         }
         Syntax::BlockStmt { body } => {
             for stmt in body {
-                visit_node(s, m, updates, *stmt);
+                visit_node(ctx, *stmt);
             }
         }
         Syntax::BreakStmt { .. } => {}
         Syntax::CallExpr {
             callee, arguments, ..
         } => {
-            visit_node(s, m, updates, *callee);
+            visit_node(ctx, *callee);
             for arg in arguments {
-                visit_node(s, m, updates, *arg);
+                visit_node(ctx, *arg);
             }
         }
         Syntax::CatchBlock { parameter, body } => {
             if let Some(p) = parameter {
-                visit_node(s, m, updates, *p);
+                visit_node(ctx, *p);
             }
-            visit_node(s, m, updates, *body);
+            visit_node(ctx, *body);
         }
         Syntax::ClassDecl {
             name,
             extends,
             members,
         } => {
-            visit_node(s, m, updates, *name);
+            visit_node(ctx, *name);
             if let Some(extends) = extends {
-                visit_node(s, m, updates, *extends);
+                visit_node(ctx, *extends);
             };
             for member in members {
-                visit_class_or_object_key(s, m, updates, &member.key);
-                visit_class_or_object_value(s, m, updates, &member.value);
+                visit_class_or_object_key(ctx, &member.key);
+                visit_class_or_object_value(ctx, &member.value);
             }
         }
         Syntax::ClassExpr {
@@ -187,19 +228,19 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
             ..
         } => {
             if let Some(name) = name {
-                visit_node(s, m, updates, *name);
+                visit_node(ctx, *name);
             }
             if let Some(extends) = extends {
-                visit_node(s, m, updates, *extends);
+                visit_node(ctx, *extends);
             };
             for member in members {
-                visit_class_or_object_key(s, m, updates, &member.key);
-                visit_class_or_object_value(s, m, updates, &member.value);
+                visit_class_or_object_key(ctx, &member.key);
+                visit_class_or_object_value(ctx, &member.value);
             }
         }
         Syntax::ComputedMemberExpr { object, member, .. } => {
-            visit_node(s, m, updates, *object);
-            visit_node(s, m, updates, *member);
+            visit_node(ctx, *object);
+            visit_node(ctx, *member);
         }
         Syntax::ConditionalExpr {
             test,
@@ -207,22 +248,69 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
             alternate,
             ..
         } => {
-            visit_node(s, m, updates, *test);
-            visit_node(s, m, updates, *consequent);
-            visit_node(s, m, updates, *alternate);
+            visit_node(ctx, *test);
+            visit_node(ctx, *consequent);
+            visit_node(ctx, *alternate);
         }
         Syntax::ContinueStmt { .. } => {}
         Syntax::DebuggerStmt {} => {}
         Syntax::DoWhileStmt { condition, body } => {
-            visit_node(s, m, updates, *body);
-            visit_node(s, m, updates, *condition);
+            visit_node(ctx, *body);
+            visit_node(ctx, *condition);
         }
         Syntax::EmptyStmt {} => {}
-        Syntax::ExportDeclStmt { declaration } => todo!(),
-        Syntax::ExportDefaultStmt { expression } => todo!(),
-        Syntax::ExportListStmt { names, from } => todo!(),
+        Syntax::ExportDeclStmt { declaration } => {
+            match ctx.nodes[*declaration].stx() {
+                Syntax::ClassDecl { name, .. } | Syntax::FunctionDecl { name, .. } => {
+                    match ctx.nodes[*name].stx() {
+                        Syntax::ClassOrFunctionName { name } => {
+                            ctx.export_bindings.push(ExportBinding {
+                                target: name.clone(),
+                                alias: name.clone(),
+                            });
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                Syntax::VarStmt { declaration } => match ctx.nodes[*declaration].stx() {
+                    Syntax::VarDecl { declarators, .. } => {
+                        for decl in declarators {
+                            visit_exported_pattern(ctx, decl.pattern);
+                        }
+                    }
+                    _ => unreachable!(),
+                },
+                _ => unreachable!(),
+            }
+            visit_node(ctx, *declaration);
+        }
+        Syntax::ExportDefaultExprStmt { expression } => visit_node(ctx, *expression),
+        Syntax::ExportListStmt { names, from } => match from {
+            // `export ... from ...` do not touch/alter the module's scope, so we can ignore completely.
+            Some(_) => {}
+            None => match names {
+                ExportNames::Specific(names) => {
+                    for e in names {
+                        ctx.export_bindings.push(ExportBinding {
+                            target: e.target.clone(),
+                            alias: match ctx.nodes[e.alias].stx() {
+                                Syntax::IdentifierPattern { name } => name.clone(),
+                                _ => unreachable!(),
+                            },
+                        });
+                        ctx.updates.replace_node(
+                            n,
+                            scope_id,
+                            SourceRange::anonymous(""),
+                            Syntax::EmptyStmt {},
+                        );
+                    }
+                }
+                ExportNames::All(_) => unreachable!(),
+            },
+        },
         Syntax::ExpressionStmt { expression } => {
-            visit_node(s, m, updates, *expression);
+            visit_node(ctx, *expression);
         }
         Syntax::ForStmt { header, body } => {
             match header {
@@ -233,25 +321,25 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
                 } => {
                     match init {
                         ForThreeInit::None => {}
-                        ForThreeInit::Expression(n) => visit_node(s, m, updates, *n),
-                        ForThreeInit::Declaration(n) => visit_node(s, m, updates, *n),
+                        ForThreeInit::Expression(n) => visit_node(ctx, *n),
+                        ForThreeInit::Declaration(n) => visit_node(ctx, *n),
                     };
                     if let Some(condition) = condition {
-                        visit_node(s, m, updates, *condition);
+                        visit_node(ctx, *condition);
                     }
                     if let Some(post) = post {
-                        visit_node(s, m, updates, *post);
+                        visit_node(ctx, *post);
                     }
                 }
                 ForStmtHeader::InOf { lhs, rhs, .. } => {
                     match lhs {
-                        ForInOfStmtHeaderLhs::Declaration(n) => visit_node(s, m, updates, *n),
-                        ForInOfStmtHeaderLhs::Pattern(n) => visit_node(s, m, updates, *n),
+                        ForInOfStmtHeaderLhs::Declaration(n) => visit_node(ctx, *n),
+                        ForInOfStmtHeaderLhs::Pattern(n) => visit_node(ctx, *n),
                     }
-                    visit_node(s, m, updates, *rhs);
+                    visit_node(ctx, *rhs);
                 }
             };
-            visit_node(s, m, updates, *body);
+            visit_node(ctx, *body);
         }
         Syntax::FunctionDecl {
             name,
@@ -259,13 +347,13 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
             body,
             ..
         } => {
-            visit_node(s, m, updates, *name);
-            visit_node(s, m, updates, *signature);
-            visit_node(s, m, updates, *body);
+            visit_node(ctx, *name);
+            visit_node(ctx, *signature);
+            visit_node(ctx, *body);
         }
         Syntax::FunctionSignature { parameters } => {
             for p in parameters {
-                visit_node(s, m, updates, *p);
+                visit_node(ctx, *p);
             }
         }
         Syntax::IfStmt {
@@ -273,19 +361,37 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
             consequent,
             alternate,
         } => {
-            visit_node(s, m, updates, *test);
-            visit_node(s, m, updates, *consequent);
+            visit_node(ctx, *test);
+            visit_node(ctx, *consequent);
             if let Some(alternate) = alternate {
-                visit_node(s, m, updates, *alternate);
+                visit_node(ctx, *alternate);
             };
         }
-        Syntax::ImportExpr { module } => visit_node(s, m, updates, *module),
-        Syntax::ImportStmt { .. } => {}
+        Syntax::ImportExpr { module } => visit_node(ctx, *module),
+        Syntax::ImportStmt { default, names, .. } => {
+            if let Some(default) = default {
+                visit_node(ctx, *default);
+            };
+            for n in names {
+                match n {
+                    ExportNames::All(alias) => {
+                        if let Some(alias) = alias {
+                            visit_node(ctx, *alias);
+                        }
+                    }
+                    ExportNames::Specific(names) => {
+                        for n in names {
+                            visit_node(ctx, n.alias);
+                        }
+                    }
+                }
+            }
+        }
         Syntax::LiteralArrayExpr { elements } => {
             for e in elements {
                 match e {
-                    ArrayElement::Single(e) => visit_node(s, m, updates, *e),
-                    ArrayElement::Rest(e) => visit_node(s, m, updates, *e),
+                    ArrayElement::Single(e) => visit_node(ctx, *e),
+                    ArrayElement::Rest(e) => visit_node(ctx, *e),
                     ArrayElement::Empty => {}
                 }
             }
@@ -295,7 +401,7 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
         Syntax::LiteralNumberExpr { .. } => {}
         Syntax::LiteralObjectExpr { members } => {
             for member in members {
-                visit_node(s, m, updates, *member);
+                visit_node(ctx, *member);
             }
         }
         Syntax::LiteralRegexExpr {} => {}
@@ -303,7 +409,7 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
         Syntax::LiteralTemplateExpr { parts } => {
             for p in parts {
                 match p {
-                    LiteralTemplatePart::Substitution(expr) => visit_node(s, m, updates, *expr),
+                    LiteralTemplatePart::Substitution(expr) => visit_node(ctx, *expr),
                     LiteralTemplatePart::String(_) => {}
                 }
             }
@@ -311,10 +417,10 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
         Syntax::LiteralUndefined {} => {}
         Syntax::ObjectPattern { properties, rest } => {
             for p in properties {
-                visit_node(s, m, updates, *p);
+                visit_node(ctx, *p);
             }
             if let Some(r) = rest {
-                visit_node(s, m, updates, *r);
+                visit_node(ctx, *r);
             }
         }
         Syntax::ObjectPatternProperty {
@@ -325,17 +431,17 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
             match key {
                 ClassOrObjectMemberKey::Direct(name) => {
                     if target.is_none() {
-                        let sym = scope.find_symbol(s, name);
+                        let sym = scope.find_symbol(ctx.scopes, name);
                         if let Some(sym) = sym {
                             let minified = generate_minified_name(sym.minified_name_id());
-                            let replacement_target_node = updates.create_node(
+                            let replacement_target_node = ctx.updates.create_node(
                                 scope_id,
                                 minified.clone(),
                                 Syntax::IdentifierPattern {
                                     name: minified.clone(),
                                 },
                             );
-                            updates.replace_node(
+                            ctx.updates.replace_node(
                                 n,
                                 scope_id,
                                 minified.clone(),
@@ -348,13 +454,13 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
                         };
                     }
                 }
-                ClassOrObjectMemberKey::Computed(c) => visit_node(s, m, updates, *c),
+                ClassOrObjectMemberKey::Computed(c) => visit_node(ctx, *c),
             };
             if let Some(target) = target {
-                visit_node(s, m, updates, *target);
+                visit_node(ctx, *target);
             }
             if let Some(v) = default_value {
-                visit_node(s, m, updates, *v);
+                visit_node(ctx, *v);
             }
         }
         Syntax::ParamDecl {
@@ -362,37 +468,37 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
             default_value,
             ..
         } => {
-            visit_node(s, m, updates, *pattern);
+            visit_node(ctx, *pattern);
             if let Some(v) = default_value {
-                visit_node(s, m, updates, *v);
+                visit_node(ctx, *v);
             }
         }
         Syntax::ReturnStmt { value } => {
             if let Some(v) = value {
-                visit_node(s, m, updates, *v);
+                visit_node(ctx, *v);
             }
         }
         Syntax::SwitchBranch { case, body } => {
             if let Some(v) = case {
-                visit_node(s, m, updates, *v);
+                visit_node(ctx, *v);
             }
             for stmt in body {
-                visit_node(s, m, updates, *stmt);
+                visit_node(ctx, *stmt);
             }
         }
         Syntax::SwitchStmt { test, branches } => {
-            visit_node(s, m, updates, *test);
+            visit_node(ctx, *test);
             for b in branches {
-                visit_node(s, m, updates, *b);
+                visit_node(ctx, *b);
             }
         }
         Syntax::ThisExpr {} => {}
         Syntax::ThrowStmt { value } => {
-            visit_node(s, m, updates, *value);
+            visit_node(ctx, *value);
         }
         Syntax::TopLevel { body } => {
             for stmt in body {
-                visit_node(s, m, updates, *stmt);
+                visit_node(ctx, *stmt);
             }
         }
         Syntax::TryStmt {
@@ -400,53 +506,53 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
             catch,
             finally,
         } => {
-            visit_node(s, m, updates, *wrapped);
+            visit_node(ctx, *wrapped);
             if let Some(catch) = catch {
-                visit_node(s, m, updates, *catch);
+                visit_node(ctx, *catch);
             }
             if let Some(finally) = finally {
-                visit_node(s, m, updates, *finally);
+                visit_node(ctx, *finally);
             }
         }
         Syntax::UnaryExpr { argument, .. } => {
-            visit_node(s, m, updates, *argument);
+            visit_node(ctx, *argument);
         }
         Syntax::UnaryPostfixExpr { argument, .. } => {
-            visit_node(s, m, updates, *argument);
+            visit_node(ctx, *argument);
         }
         Syntax::VarDecl { declarators, .. } => {
             for decl in declarators {
-                visit_node(s, m, updates, decl.pattern);
+                visit_node(ctx, decl.pattern);
                 if let Some(e) = decl.initializer {
-                    visit_node(s, m, updates, e);
+                    visit_node(ctx, e);
                 }
             }
         }
         Syntax::VarStmt { declaration } => {
-            visit_node(s, m, updates, *declaration);
+            visit_node(ctx, *declaration);
         }
         Syntax::WhileStmt { condition, body } => {
-            visit_node(s, m, updates, *condition);
-            visit_node(s, m, updates, *body);
+            visit_node(ctx, *condition);
+            visit_node(ctx, *body);
         }
         Syntax::ObjectMember { typ } => {
             match typ {
                 ObjectMemberType::Valued { key, value } => {
-                    visit_class_or_object_key(s, m, updates, key);
-                    visit_class_or_object_value(s, m, updates, value);
+                    visit_class_or_object_key(ctx, key);
+                    visit_class_or_object_value(ctx, value);
                 }
                 ObjectMemberType::Shorthand { name } => {
-                    let sym = scope.find_symbol(s, name);
+                    let sym = scope.find_symbol(ctx.scopes, name);
                     if let Some(sym) = sym {
                         let minified = generate_minified_name(sym.minified_name_id());
-                        let replacement_initializer_node = updates.create_node(
+                        let replacement_initializer_node = ctx.updates.create_node(
                             scope_id,
                             minified.clone(),
                             Syntax::IdentifierExpr {
                                 name: minified.clone(),
                             },
                         );
-                        updates.replace_node(
+                        ctx.updates.replace_node(
                             n,
                             scope_id,
                             minified.clone(),
@@ -462,18 +568,18 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
                     };
                 }
                 ObjectMemberType::Rest { value } => {
-                    visit_node(s, m, updates, *value);
+                    visit_node(ctx, *value);
                 }
             };
         }
         Syntax::MemberExpr { left, .. } => {
-            visit_node(s, m, updates, *left);
+            visit_node(ctx, *left);
         }
         Syntax::LabelStmt { statement, .. } => {
-            visit_node(s, m, updates, *statement);
+            visit_node(ctx, *statement);
         }
         Syntax::CallArg { value, .. } => {
-            visit_node(s, m, updates, *value);
+            visit_node(ctx, *value);
         }
         Syntax::SuperExpr {} => {}
     };
@@ -482,6 +588,7 @@ fn visit_node(s: &ScopeMap, m: &NodeMap, updates: &mut NodeUpdates, n: NodeId) -
 pub fn minify_js(
     scope_map: &mut ScopeMap,
     node_map: &mut NodeMap,
+    top_level_scope_id: ScopeId,
     top_level_node_id: NodeId,
 ) -> () {
     // We need these since we cannot look up in scope_map while mutably borrowed by iter_mut().
@@ -500,14 +607,56 @@ pub fn minify_js(
         minified_name_starts[id] = minified_name_start;
     }
 
-    let mut node_updates = NodeUpdates::new(node_map);
+    let mut export_bindings = Vec::new();
+    let mut updates = NodeUpdates::new(node_map);
+    let mut ctx = VisitorCtx {
+        export_bindings: &mut export_bindings,
+        nodes: node_map,
+        scopes: scope_map,
+        updates: &mut updates,
+    };
     match node_map[top_level_node_id].stx() {
         Syntax::TopLevel { body } => {
             for n in body.iter() {
-                visit_node(&scope_map, &node_map, &mut node_updates, *n);
+                visit_node(&mut ctx, *n);
             }
         }
         _ => panic!("not top level"),
     };
-    node_updates.apply_updates(node_map);
+    updates.apply_updates(node_map);
+    let export_names = export_bindings
+        .iter()
+        .map(|e| ExportName {
+            target: generate_minified_name(
+                scope_map[top_level_scope_id]
+                    .find_symbol(scope_map, &e.target)
+                    .expect(format!("failed to find top-level export `{:?}`", e.target).as_str())
+                    .minified_name_id(),
+            ),
+            alias: node_map.create_node(
+                top_level_scope_id,
+                e.alias.clone(),
+                Syntax::IdentifierPattern {
+                    name: e.alias.clone(),
+                },
+            ),
+        })
+        .collect::<Vec<ExportName>>();
+
+    if !export_names.is_empty() {
+        let final_export_stmt = node_map.create_node(
+            top_level_scope_id,
+            SourceRange::anonymous(""),
+            Syntax::ExportListStmt {
+                names: ExportNames::Specific(export_names),
+                from: None,
+            },
+        );
+        match node_map[top_level_node_id].stx_mut() {
+            Syntax::TopLevel { body } => {
+                body.push(final_export_stmt);
+            }
+            _ => unreachable!(),
+        }
+    }
 }

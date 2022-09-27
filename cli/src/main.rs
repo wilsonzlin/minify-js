@@ -1,4 +1,4 @@
-use minify_js::minify;
+use minify_js::{minify, TopLevelMode};
 use std::fs::File;
 use std::io::{stdin, stdout, BufWriter, Read, Write};
 
@@ -15,6 +15,10 @@ struct Cli {
     /// Output destination; omit for stdout.
     #[structopt(short, long, parse(from_os_str))]
     output: Option<std::path::PathBuf>,
+
+    /// Whether file is a module or global script.
+    #[structopt(short, long)]
+    mode: TopLevelMode,
 }
 
 fn main() {
@@ -30,5 +34,5 @@ fn main() {
         None => Box::new(stdout()),
     };
     let mut output = BufWriter::new(out_file);
-    minify(input.to_vec(), &mut output).expect("minify");
+    minify(args.mode, input.to_vec(), &mut output).expect("minify");
 }
