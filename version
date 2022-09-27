@@ -95,7 +95,11 @@ for (const f of ["rust/Cargo.toml", "cli/Cargo.toml", "nodejs/Cargo.toml"]) {
 }
 
 for (const f of ["nodejs/Cargo.toml"]) {
-  replaceInFile(f, /^(minify-js = { version = )"\d+\.\d+\.\d+"/m, `$1"${NEW_VERSION}"`);
+  replaceInFile(
+    f,
+    /^(minify-js = { version = )"\d+\.\d+\.\d+"/m,
+    `$1"${NEW_VERSION}"`
+  );
 }
 
 for (const f of ["nodejs/package.json"]) {

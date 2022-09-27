@@ -212,7 +212,9 @@ fn visit_node(ctx: &mut VisitorCtx, n: NodeId) -> () {
             extends,
             members,
         } => {
-            visit_node(ctx, *name);
+            if let Some(name) = name {
+                visit_node(ctx, *name);
+            }
             if let Some(extends) = extends {
                 visit_node(ctx, *extends);
             };
@@ -259,18 +261,28 @@ fn visit_node(ctx: &mut VisitorCtx, n: NodeId) -> () {
             visit_node(ctx, *condition);
         }
         Syntax::EmptyStmt {} => {}
-        Syntax::ExportDeclStmt { declaration } => {
+        Syntax::ExportDeclStmt {
+            declaration,
+            default,
+        } => {
             match ctx.nodes[*declaration].stx() {
                 Syntax::ClassDecl { name, .. } | Syntax::FunctionDecl { name, .. } => {
-                    match ctx.nodes[*name].stx() {
-                        Syntax::ClassOrFunctionName { name } => {
-                            ctx.export_bindings.push(ExportBinding {
-                                target: name.clone(),
-                                alias: name.clone(),
-                            });
-                        }
-                        _ => unreachable!(),
-                    }
+                    match name {
+                        Some(name) => match ctx.nodes[*name].stx() {
+                            Syntax::ClassOrFunctionName { name } => {
+                                ctx.export_bindings.push(ExportBinding {
+                                    target: name.clone(),
+                                    alias: if *default {
+                                        SourceRange::anonymous("default")
+                                    } else {
+                                        name.clone()
+                                    },
+                                });
+                            }
+                            _ => unreachable!(),
+                        },
+                        None => {}
+                    };
                 }
                 Syntax::VarStmt { declaration } => match ctx.nodes[*declaration].stx() {
                     Syntax::VarDecl { declarators, .. } => {
@@ -347,7 +359,9 @@ fn visit_node(ctx: &mut VisitorCtx, n: NodeId) -> () {
             body,
             ..
         } => {
-            visit_node(ctx, *name);
+            if let Some(n) = name {
+                visit_node(ctx, *n);
+            }
             visit_node(ctx, *signature);
             visit_node(ctx, *body);
         }

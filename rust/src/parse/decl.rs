@@ -99,20 +99,21 @@ pub fn parse_decl_function(
     let generator = parser.consume_if(TokenType::Asterisk)?.is_match();
     // WARNING: The name belongs in the containing scope, not the function's scope.
     // For example, `function a() { let a = 1; }` is legal.
-    let name = match parser.next()? {
-        t if is_valid_pattern_identifier(t.typ(), syntax) => t,
-        t => return Err(t.error(SyntaxErrorType::ExpectedSyntax("function name"))),
-    }
-    .loc()
-    .clone();
-    let name_node = parser.create_node(
-        scope,
-        name.clone(),
-        Syntax::ClassOrFunctionName { name: name.clone() },
-    );
-    if let Some(closure_id) = parser[scope].self_or_ancestor_closure() {
-        parser[closure_id].add_symbol(name.clone(), Symbol::new(name_node))?;
-    }
+    // The name can only be omitted in default exports.
+    let name = match parser.consume_if(TokenType::Identifier)?.match_loc_take() {
+        Some(name) => {
+            let name_node = parser.create_node(
+                scope,
+                name.clone(),
+                Syntax::ClassOrFunctionName { name: name.clone() },
+            );
+            if let Some(closure_id) = parser[scope].self_or_ancestor_closure() {
+                parser[closure_id].add_symbol(name.clone(), Symbol::new(name_node))?;
+            };
+            Some(name_node)
+        }
+        _ => None,
+    };
     let signature = parse_signature_function(fn_scope, parser, syntax)?;
     let body = parse_stmt_block(fn_scope, parser, syntax)?;
     Ok(parser.create_node(
@@ -121,7 +122,7 @@ pub fn parse_decl_function(
         Syntax::FunctionDecl {
             is_async,
             generator,
-            name: name_node,
+            name,
             signature,
             body,
         },
@@ -134,14 +135,20 @@ pub fn parse_decl_class(
     syntax: &ParsePatternSyntax,
 ) -> SyntaxResult<NodeId> {
     let start = parser.require(TokenType::KeywordClass)?.loc().clone();
-    let name = parser.require(TokenType::Identifier)?.loc().clone();
-    let name_node = parser.create_node(
-        scope,
-        name.clone(),
-        Syntax::ClassOrFunctionName { name: name.clone() },
-    );
+    // Names can be omitted only in default exports.
+    let name = match parser.consume_if(TokenType::Identifier)?.match_loc_take() {
+        Some(name) => {
+            let name_node = parser.create_node(
+                scope,
+                name.clone(),
+                Syntax::ClassOrFunctionName { name: name.clone() },
+            );
+            parser[scope].add_block_symbol(name.clone(), Symbol::new(name_node))?;
+            Some(name_node)
+        }
+        None => None,
+    };
     // Unlike functions, classes are scoped to their block.
-    parser[scope].add_block_symbol(name.clone(), Symbol::new(name_node))?;
     let extends = if parser.consume_if(TokenType::KeywordExtends)?.is_match() {
         Some(parse_expr(scope, parser, TokenType::BraceOpen, syntax)?)
     } else {
@@ -152,7 +159,7 @@ pub fn parse_decl_class(
         scope,
         &start + &end,
         Syntax::ClassDecl {
-            name: name_node,
+            name,
             extends,
             members,
         },

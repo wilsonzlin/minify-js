@@ -91,8 +91,8 @@ fn test_emit_module() {
           export const {meaning} = {meaning: 42}, life = 10;
           console.log("meaning", meaning);
 
-          export default 1;
-          console.log(life);
+          export default function ship() {};
+          console.log(ship(life));
 
           ReactDOM.hello();
 
@@ -107,10 +107,33 @@ fn test_emit_module() {
         const g=1;\
         const {meaning:h}={meaning:42},i=10;\
         console.log(\"meaning\",h);\
-        export default 1;\
-        console.log(i);\
+        function j(){};\
+        console.log(j(i));\
         f.hello();\
-        export{h as meaning,i as life,b as use_state,c as reactUseEffect}\
+        export{h as meaning,i as life,j as default,b as use_state,c as reactUseEffect}\
         ",
-    )
+    );
+    check(
+        TopLevelMode::Module,
+        r#"
+          export const x = 1;
+          export default function(){}
+        "#,
+        "\
+        const a=1;\
+        export default function(){};\
+        export{a as x}\
+        ",
+    );
+    check(
+        TopLevelMode::Module,
+        r#"
+          export * from "react";
+          export default class{}
+        "#,
+        "\
+        export*from\"react\";\
+        export default class{}\
+        ",
+    );
 }

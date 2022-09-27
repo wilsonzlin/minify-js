@@ -176,8 +176,9 @@ fn emit_class<T: Write>(
     extends: Option<NodeId>,
     members: &Vec<ClassMember>,
 ) -> io::Result<()> {
-    out.write_all(b"class ")?;
+    out.write_all(b"class")?;
     if let Some(n) = name {
+        out.write_all(b" ")?;
         emit_js(out, map, n)?;
     }
     if let Some(s) = extends {
@@ -426,7 +427,7 @@ fn emit_js_under_operator<T: Write>(
             extends,
             members,
         } => {
-            emit_class(out, map, Some(*name), *extends, members)?;
+            emit_class(out, map, *name, *extends, members)?;
         }
         Syntax::FunctionDecl {
             is_async,
@@ -441,10 +442,12 @@ fn emit_js_under_operator<T: Write>(
             out.write_all(b"function")?;
             if *generator {
                 out.write_all(b"*")?;
-            } else {
+            } else if name.is_some() {
                 out.write_all(b" ")?;
             };
-            emit_js(out, map, *name)?;
+            if let Some(name) = name {
+                emit_js(out, map, *name)?;
+            }
             out.write_all(b"(")?;
             emit_js(out, map, *signature)?;
             out.write_all(b")")?;
@@ -764,7 +767,20 @@ fn emit_js_under_operator<T: Write>(
             out.write_all(b"]")?;
         }
         // We split all `export class/function` into a declaration and an export at the end, so drop the `export`.
-        Syntax::ExportDeclStmt { declaration } => {
+        // The exception is for unnamed functions and classes.
+        Syntax::ExportDeclStmt {
+            declaration,
+            default,
+        } => {
+            match map[*declaration].stx() {
+                Syntax::ClassDecl { name, .. } | Syntax::FunctionDecl { name, .. }
+                    if name.is_none() =>
+                {
+                    debug_assert!(default);
+                    out.write_all(b"export default ")?;
+                }
+                _ => {}
+            };
             emit_js(out, map, *declaration)?;
         }
         Syntax::ExportDefaultExprStmt { expression } => {

@@ -79,7 +79,7 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
             members,
         } => json!({
             "$t": "ClassDecl",
-            "name": visit_node(m, *name),
+            "name": name.map(|n| visit_node(m, n)),
             "extends": extends.map(|n| visit_node(m, n)),
             "members": members.iter().map(|mem| json!({
                 "static": mem.statik,
@@ -113,7 +113,7 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
             "$t": "FunctionDecl",
             "async": is_async,
             "generator": generator,
-            "name": visit_node(m, *name),
+            "name": name.map(|n| visit_node(m, n)),
             "signature": visit_node(m, *signature),
             "body": visit_node(m, *body),
         }),
@@ -309,9 +309,13 @@ fn visit_node(m: &NodeMap, n: NodeId) -> Value {
         Syntax::EmptyStmt {} => json!({
             "$t": "EmptyStmt",
         }),
-        Syntax::ExportDeclStmt { declaration } => json!({
+        Syntax::ExportDeclStmt {
+            declaration,
+            default,
+        } => json!({
             "$t": "ExportDeclStmt",
             "declaration": visit_node(m, *declaration),
+            "default": default,
         }),
         Syntax::ExportDefaultExprStmt { expression } => json!({
             "$t": "ExportDefaultStmt",

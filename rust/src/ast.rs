@@ -281,14 +281,14 @@ pub enum Syntax {
 
     // Declarations.
     ClassDecl {
-        name: NodeId,
+        name: Option<NodeId>, // Name can only be omitted in a default export.
         extends: Option<Expression>,
         members: Vec<ClassMember>,
     },
     FunctionDecl {
         generator: bool,
         is_async: bool,
-        name: NodeId,
+        name: Option<NodeId>, // Name can only be omitted in a default export.
         signature: NodeId,
         body: Statement,
     },
@@ -411,6 +411,7 @@ pub enum Syntax {
     EmptyStmt {},
     ExportDeclStmt {
         declaration: Declaration,
+        default: bool,
     },
     ExportDefaultExprStmt {
         expression: Expression,

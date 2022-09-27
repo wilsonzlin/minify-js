@@ -265,12 +265,15 @@ pub fn parse_stmt_export(
         }
         TokenType::KeywordDefault => match parser.peek()?.typ() {
             // `class` and `function` are treated as statements that are hoisted, not expressions; however, they can be unnamed, which gives them the name `default`.
-            TokenType::KeywordClass | TokenType::KeywordFunction => {
+            TokenType::KeywordAsync | TokenType::KeywordClass | TokenType::KeywordFunction => {
                 let declaration = parse_stmt(scope, parser, syntax)?;
                 parser.create_node(
                     scope,
                     start.loc() + parser[declaration].loc(),
-                    Syntax::ExportDeclStmt { declaration },
+                    Syntax::ExportDeclStmt {
+                        declaration,
+                        default: true,
+                    },
                 )
             }
             _ => {
@@ -293,7 +296,10 @@ pub fn parse_stmt_export(
             parser.create_node(
                 scope,
                 start.loc() + parser[declaration].loc(),
-                Syntax::ExportDeclStmt { declaration },
+                Syntax::ExportDeclStmt {
+                    declaration,
+                    default: false,
+                },
             )
         }
         _ => return Err(t.error(SyntaxErrorType::ExpectedSyntax("exportable"))),
