@@ -154,19 +154,20 @@ impl Parser {
         &mut self,
         mode: LexMode,
         keep: K,
-    ) -> SyntaxResult<Token> {
+    ) -> SyntaxResult<(bool, Token)> {
         match self.buffered.as_ref() {
             Some(b) if b.lex_mode == mode => Ok(if keep(&b.token) {
                 self.lexer.apply_checkpoint(b.after_checkpoint);
-                self.buffered.take().unwrap().token
+                (true, self.buffered.take().unwrap().token)
             } else {
-                b.token.clone()
+                (false, b.token.clone())
             }),
             _ => {
                 // Don't use self.checkpoint as self.backtrack will clear buffer.
                 let cp = self.lexer.checkpoint();
                 let t = lex_next(&mut self.lexer, mode)?;
-                self.buffered = if keep(&t) {
+                let k = keep(&t);
+                self.buffered = if k {
                     None
                 } else {
                     let after_checkpoint = self.lexer.checkpoint();
@@ -177,13 +178,13 @@ impl Parser {
                         after_checkpoint,
                     })
                 };
-                Ok(t)
+                Ok((k, t))
             }
         }
     }
 
     pub fn next_with_mode(&mut self, mode: LexMode) -> SyntaxResult<Token> {
-        self.forward(mode, |_| true)
+        self.forward(mode, |_| true).map(|r| r.1)
     }
 
     pub fn next(&mut self) -> SyntaxResult<Token> {
@@ -191,7 +192,7 @@ impl Parser {
     }
 
     pub fn peek_with_mode(&mut self, mode: LexMode) -> SyntaxResult<Token> {
-        self.forward(mode, |_| false)
+        self.forward(mode, |_| false).map(|r| r.1)
     }
 
     pub fn peek(&mut self) -> SyntaxResult<Token> {
@@ -204,16 +205,25 @@ impl Parser {
     }
 
     pub fn maybe_with_mode(&mut self, typ: TokenType, mode: LexMode) -> SyntaxResult<MaybeToken> {
-        let t = self.forward(mode, |t| t.typ() == typ)?;
+        let (matched, t) = self.forward(mode, |t| t.typ() == typ)?;
         Ok(MaybeToken {
             typ,
-            matched: t.typ() == typ,
+            matched,
             range: t.loc_take(),
         })
     }
 
     pub fn consume_if(&mut self, typ: TokenType) -> SyntaxResult<MaybeToken> {
         self.maybe_with_mode(typ, LexMode::Standard)
+    }
+
+    pub fn consume_if_pred<F: FnOnce(&Token) -> bool>(&mut self, pred: F) -> SyntaxResult<MaybeToken> {
+        let (matched, t) = self.forward(LexMode::Standard, pred)?;
+        Ok(MaybeToken {
+            typ: t.typ(),
+            matched,
+            range: t.loc_take(),
+        })
     }
 
     pub fn require_with_mode(&mut self, typ: TokenType, mode: LexMode) -> SyntaxResult<Token> {

@@ -100,7 +100,7 @@ pub fn parse_decl_function(
     // WARNING: The name belongs in the containing scope, not the function's scope.
     // For example, `function a() { let a = 1; }` is legal.
     // The name can only be omitted in default exports.
-    let name = match parser.consume_if(TokenType::Identifier)?.match_loc_take() {
+    let name = match parser.consume_if_pred(|t| is_valid_pattern_identifier(t.typ(), syntax))?.match_loc_take() {
         Some(name) => {
             let name_node = parser.create_node(
                 scope,
@@ -136,7 +136,7 @@ pub fn parse_decl_class(
 ) -> SyntaxResult<NodeId> {
     let start = parser.require(TokenType::KeywordClass)?.loc().clone();
     // Names can be omitted only in default exports.
-    let name = match parser.consume_if(TokenType::Identifier)?.match_loc_take() {
+    let name = match parser.consume_if_pred(|t| is_valid_pattern_identifier(t.typ(), syntax))?.match_loc_take() {
         Some(name) => {
             let name_node = parser.create_node(
                 scope,
