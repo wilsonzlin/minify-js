@@ -10,7 +10,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-minify-js = "0.1.3"
+minify-js = { version = "0.1.5", path = "../rust" }
 
 [dependencies.neon]
 version = "0.10"
