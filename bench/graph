@@ -8,7 +8,7 @@ rm -rf graphs
 mkdir graphs
 
 gnuplot << 'EOD'
-set terminal svg
+set terminal svg enhanced background rgb "white"
 set output "graphs/average-sizes.svg"
 
 set title font "Arial,18"
