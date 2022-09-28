@@ -36,6 +36,7 @@ fn generate_minified_name(mut id: usize) -> SourceRange {
         // There should be exactly one ALT_MINIFIED_NAMES element for each KEYWORD_STRS entry.
         // Using a Unicode name will ensure no chance of clashing with keywords, well-knowns, and almost all variables.
         // Clashes can appear quickly e.g. `in`, `of`, `if`.
+        // TODO This could still clash with an untracked or unminified variable; however, that's technically true of any minified name.
         let s = ALT_MINIFIED_NAMES[*alt_id].encode_utf8(&mut name).len();
         name.truncate(s);
     };

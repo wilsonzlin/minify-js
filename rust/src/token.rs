@@ -119,6 +119,7 @@ pub enum TokenType {
     Plus,
     PlusEquals,
     PlusPlus,
+    PrivateMember,
     Question,
     QuestionDot,
     QuestionDotBracketOpen,

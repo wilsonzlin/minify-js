@@ -6,7 +6,8 @@ use lazy_static::lazy_static;
 use memchr::{memchr, memchr2, memchr3};
 
 use crate::char::{
-    CharFilter, DIGIT, DIGIT_BIN, DIGIT_HEX, DIGIT_OCT, ID_CONTINUE, ID_START_CHARSTR, WHITESPACE,
+    CharFilter, DIGIT, DIGIT_BIN, DIGIT_HEX, DIGIT_OCT, ID_CONTINUE, ID_START, ID_START_CHARSTR,
+    WHITESPACE,
 };
 use crate::error::{SyntaxError, SyntaxErrorType, SyntaxResult};
 use crate::source::{Source, SourceRange};
@@ -259,6 +260,7 @@ lazy_static! {
         map.insert(TokenType::Plus, b"+");
         map.insert(TokenType::PlusEquals, b"+=");
         map.insert(TokenType::PlusPlus, b"++");
+        map.insert(TokenType::PrivateMember, b"#");
         map.insert(TokenType::Question, b"?");
         map.insert(TokenType::QuestionDot, b"?.");
         map.insert(TokenType::QuestionQuestion, b"??");
@@ -463,6 +465,30 @@ fn lex_number_oct(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> Synta
     ))
 }
 
+fn lex_private_member(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> SyntaxResult<Token> {
+    let cp = lexer.checkpoint();
+    // Include the `#` in the token.
+    lexer.skip_expect(1);
+    if !ID_START.has(lexer.peek(0)?) {
+        return Err(lexer.error(SyntaxErrorType::ExpectedSyntax("private member")));
+    };
+    lexer.skip_expect(1);
+    // TODO This is copied from lex_identifier.
+    loop {
+        lexer.consume(lexer.while_chars(&ID_CONTINUE));
+        // TODO We assume if it's not ASCII it's part of a UTF-8 byte sequence, and that sequence represents a valid JS identifier continue code point.
+        if lexer.peek_or_eof(0).filter(|c| !c.is_ascii()).is_none() {
+            break;
+        };
+        lexer.skip_expect(1);
+    }
+    Ok(Token::new(
+        lexer.since_checkpoint(cp),
+        TokenType::PrivateMember,
+        preceded_by_line_terminator,
+    ))
+}
+
 // TODO Validate regex.
 fn lex_regex(lexer: &mut Lexer, preceded_by_line_terminator: bool) -> SyntaxResult<Token> {
     let cp = lexer.checkpoint();
@@ -633,6 +659,9 @@ pub fn lex_next(lexer: &mut Lexer, mode: LexMode) -> SyntaxResult<Token> {
                     TokenType::LiteralString => lex_string(lexer, preceded_by_line_terminator),
                     TokenType::LiteralTemplatePartString => {
                         lex_template(lexer, preceded_by_line_terminator)
+                    }
+                    TokenType::PrivateMember => {
+                        lex_private_member(lexer, preceded_by_line_terminator)
                     }
                     TokenType::Slash | TokenType::SlashEquals if mode == LexMode::SlashIsRegex => {
                         lex_regex(lexer, preceded_by_line_terminator)

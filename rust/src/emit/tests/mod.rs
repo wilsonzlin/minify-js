@@ -137,3 +137,12 @@ fn test_emit_module() {
         ",
     );
 }
+
+#[test]
+fn test_emit_private_member() {
+    check(
+        TopLevelMode::Global,
+        "console.log(this.#hello);",
+        "console.log(this.#hello)",
+    );
+}

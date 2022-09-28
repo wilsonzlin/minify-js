@@ -996,6 +996,7 @@ pub fn parse_expr_with_min_prec(
                         let right_tok = parser.next()?;
                         match right_tok.typ() {
                             TokenType::Identifier => {}
+                            TokenType::PrivateMember => {}
                             t if KEYWORDS_MAPPING.contains_key(&t) => {}
                             _ => {
                                 return Err(right_tok.error(SyntaxErrorType::ExpectedSyntax(
