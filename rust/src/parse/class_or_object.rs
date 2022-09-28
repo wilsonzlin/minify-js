@@ -10,7 +10,7 @@ use crate::{
 use super::{
     expr::{parse_expr, parse_expr_until_either_with_asi, Asi},
     parser::Parser,
-    pattern::{parse_pattern, ParsePatternAction, ParsePatternSyntax},
+    pattern::{is_valid_pattern_identifier, parse_pattern, ParsePatternAction, ParsePatternSyntax},
     signature::parse_signature_function,
     stmt::parse_stmt_block,
 };
@@ -107,7 +107,15 @@ pub fn parse_class_or_object_member(
         {
             // TODO Do we need to normalise?
             num
-        } else if let Some(loc) = parser.consume_if(TokenType::Identifier)?.match_loc_take() {
+        } else if let Some(loc) = parser
+            .consume_if(TokenType::PrivateMember)?
+            .match_loc_take()
+        {
+            loc
+        } else if let Some(loc) = parser
+            .consume_if_pred(|t| is_valid_pattern_identifier(t.typ(), syntax))?
+            .match_loc_take()
+        {
             loc
         } else {
             parser

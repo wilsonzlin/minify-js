@@ -142,7 +142,26 @@ fn test_emit_module() {
 fn test_emit_private_member() {
     check(
         TopLevelMode::Global,
-        "console.log(this.#hello);",
-        "console.log(this.#hello)",
+        r#"
+          class A {
+            set = 1;
+            await
+            #hello;
+            #goodbye = 1;
+
+            ring() {
+              console.log(this.#hello);
+            }
+          }
+        "#,
+        "\
+          class A{\
+          set=1;\
+          await;\
+          #hello;\
+          #goodbye=1;\
+          ring(){console.log(this.#hello)}\
+          }\
+        ",
     );
 }
