@@ -1,3 +1,5 @@
+use std::error::Error;
+use std::fmt::{Display, Formatter};
 use emit::emit_js;
 use error::SyntaxError;
 use lex::Lexer;
@@ -29,6 +31,21 @@ pub enum MinifyError {
     Syntax(SyntaxError),
     IO(io::Error),
 }
+
+impl Display for MinifyError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MinifyError::Syntax(syntax) => {
+                write!(f, "Syntax Error: {:?}", syntax)
+            }
+            MinifyError::IO(io) => {
+                write!(f, "IO Error: {}", io)
+            }
+        }
+    }
+}
+
+impl Error for MinifyError {}
 
 /// Minifies UTF-8 JavaScript code, represented as an array of bytes.
 ///
