@@ -1,4 +1,4 @@
-use crate::{
+use parse_js::{
     ast::{
         ArrayElement, ClassOrObjectMemberKey, ClassOrObjectMemberValue, ExportName, ExportNames,
         ForInOfStmtHeaderLhs, ForStmtHeader, ForThreeInit, LiteralTemplatePart, NodeId, NodeMap,

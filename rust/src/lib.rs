@@ -1,30 +1,16 @@
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use emit::emit_js;
-use error::SyntaxError;
-use lex::Lexer;
+use parse_js::error::SyntaxError;
+use parse_js::lex::Lexer;
 use minify::minify_js;
-use parse::{parser::Parser, toplevel::parse_top_level};
+use parse_js::parse::{parser::Parser, toplevel::parse_top_level};
 use std::io::{self, Write};
 
-mod ast;
-mod char;
 mod emit;
-mod error;
-mod lex;
 mod minify;
-mod num;
-mod operator;
-mod parse;
-#[cfg(test)]
-mod serialise;
-mod source;
-mod symbol;
-mod token;
-mod update;
-mod util;
 
-pub use parse::toplevel::TopLevelMode;
+pub use parse_js::parse::toplevel::TopLevelMode;
 
 #[derive(Debug)]
 pub enum MinifyError {

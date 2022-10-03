@@ -1,10 +1,10 @@
 use std::io::BufWriter;
 
 use crate::emit::emit_js;
-use crate::lex::Lexer;
+use parse_js::lex::Lexer;
 use crate::minify::minify_js;
-use crate::parse::parser::Parser;
-use crate::parse::toplevel::parse_top_level;
+use parse_js::parse::parser::Parser;
+use parse_js::parse::toplevel::parse_top_level;
 use crate::TopLevelMode;
 
 fn check(top_level_mode: TopLevelMode, src: &str, expected: &str) -> () {

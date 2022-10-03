@@ -1,9 +1,9 @@
-use crate::ast::{
+use parse_js::ast::{
     ArrayElement, ClassMember, ClassOrObjectMemberKey, ClassOrObjectMemberValue, ExportNames,
     ForInOfStmtHeaderLhs, ForStmtHeader, ForThreeInit, LiteralTemplatePart, NodeId, NodeMap,
     ObjectMemberType, Syntax, VarDeclMode,
 };
-use crate::operator::{OperatorName, OPERATORS};
+use parse_js::operator::{OperatorName, OPERATORS};
 use lazy_static::lazy_static;
 use std::io::Write;
 use std::{collections::HashMap, io};
