@@ -1,10 +1,10 @@
-use std::error::Error;
-use std::fmt::{Display, Formatter};
 use emit::emit_js;
+use minify::minify_js;
 use parse_js::error::SyntaxError;
 use parse_js::lex::Lexer;
-use minify::minify_js;
 use parse_js::parse::{parser::Parser, toplevel::parse_top_level};
+use std::error::Error;
+use std::fmt::{Display, Formatter};
 use std::io::{self, Write};
 
 mod emit;

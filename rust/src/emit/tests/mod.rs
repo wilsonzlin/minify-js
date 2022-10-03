@@ -1,11 +1,11 @@
 use std::io::BufWriter;
 
 use crate::emit::emit_js;
-use parse_js::lex::Lexer;
 use crate::minify::minify_js;
+use crate::TopLevelMode;
+use parse_js::lex::Lexer;
 use parse_js::parse::parser::Parser;
 use parse_js::parse::toplevel::parse_top_level;
-use crate::TopLevelMode;
 
 fn check(top_level_mode: TopLevelMode, src: &str, expected: &str) -> () {
     let mut parser = Parser::new(Lexer::new(src.as_bytes().to_vec()));
