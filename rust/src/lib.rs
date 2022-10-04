@@ -1,8 +1,8 @@
 use emit::emit_js;
 use minify::minify_js;
+use parse_js::ast::{NodeId, NodeMap};
 use parse_js::error::SyntaxError;
-use parse_js::lex::Lexer;
-use parse_js::parse::{parser::Parser, toplevel::parse_top_level};
+use parse_js::parse;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::io::{self, Write};
@@ -33,6 +33,21 @@ impl Display for MinifyError {
 
 impl Error for MinifyError {}
 
+/// Emits UTF-8 JavaScript code from a parsed AST in a minified way. This allows custom introspections and transforms on the tree before emitting it to code.
+///
+/// # Arguments
+///
+/// * `node_map` - The NodeMap from the parsed AST.
+/// * `top_level_node_id` - The ID of the root node from the parsed AST.
+/// * `output` - Destination to write output JavaScript code.
+pub fn emit<T: Write>(
+    node_map: &NodeMap,
+    top_level_node_id: NodeId,
+    output: &mut T,
+) -> Result<(), MinifyError> {
+    emit_js(output, node_map, top_level_node_id).map_err(|err| MinifyError::IO(err))
+}
+
 /// Minifies UTF-8 JavaScript code, represented as an array of bytes.
 ///
 /// # Arguments
@@ -55,17 +70,13 @@ pub fn minify<T: Write>(
     source: Vec<u8>,
     output: &mut T,
 ) -> Result<(), MinifyError> {
-    let lexer = Lexer::new(source);
-    let mut parser = Parser::new(lexer);
-    let parsed =
-        parse_top_level(&mut parser, top_level_mode).map_err(|err| MinifyError::Syntax(err))?;
-    let (mut node_map, mut scope_map) = parser.take();
+    let mut parsed = parse(source, top_level_mode).map_err(|err| MinifyError::Syntax(err))?;
     minify_js(
-        &mut scope_map,
-        &mut node_map,
+        &mut parsed.scope_map,
+        &mut parsed.node_map,
         parsed.top_level_scope_id,
         parsed.top_level_node_id,
     );
-    emit_js(output, &node_map, parsed.top_level_node_id).map_err(|err| MinifyError::IO(err))?;
+    emit(&parsed.node_map, parsed.top_level_node_id, output)?;
     Ok(())
 }
