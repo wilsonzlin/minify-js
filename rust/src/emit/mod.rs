@@ -269,6 +269,7 @@ fn get_leaf_node_type(m: &NodeMap, n: NodeId) -> LeafNodeType {
         },
         Syntax::BlockStmt { .. } => LeafNodeType::Block,
         Syntax::EmptyStmt {} => LeafNodeType::EmptyStmt,
+        Syntax::TryStmt { .. } => LeafNodeType::Block,
         _ => LeafNodeType::Other,
     }
 }

@@ -194,3 +194,23 @@ fn test_emit_arrow_function_return_expression() {
         "()=>({})",
     );
 }
+
+#[test]
+fn test_emit_nested_blockless_statements() {
+    check(
+        TopLevelMode::Global,
+        r#"
+          function fn(a, b) {
+            if (a)
+              if (b)
+                try {
+                  c()
+                } catch (c) {
+                  e(f)
+                }
+              else g = h
+          }
+        "#,
+        "function fn(a,b){if(a)if(b)try{c()}catch(c){e(f)}else g=h}",
+    );
+}
