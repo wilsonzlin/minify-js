@@ -106,6 +106,30 @@ impl<'a> Visitor for MinifyVisitor<'a> {
         let scope_id = self.nodes[node].scope();
         let scope = &self.scopes[scope_id];
         match self.nodes[node].stx() {
+            Syntax::ArrowFunctionExpr {
+                is_async,
+                signature,
+                body,
+            } => {
+                if let Syntax::BlockStmt { body } = self.nodes[*body].stx() {
+                    if body.len() == 1 {
+                        if let Syntax::ReturnStmt { value } = self.nodes[body[0]].stx() {
+                            if let Some(return_value) = value {
+                                self.updates.replace_node(
+                                    node,
+                                    scope_id,
+                                    self.nodes[node].loc().clone(),
+                                    Syntax::ArrowFunctionExpr {
+                                        is_async: *is_async,
+                                        signature: *signature,
+                                        body: *return_value,
+                                    },
+                                );
+                            }
+                        };
+                    };
+                };
+            }
             stx @ (Syntax::IdentifierPattern { name }
             | Syntax::IdentifierExpr { name }
             | Syntax::ClassOrFunctionName { name }) => {

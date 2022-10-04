@@ -165,3 +165,32 @@ fn test_emit_private_member() {
         ",
     );
 }
+
+#[test]
+fn test_emit_arrow_function_return_expression() {
+    check(
+        TopLevelMode::Global,
+        r#"
+          () => {
+            return 1;
+          }
+        "#,
+        "()=>1",
+    );
+    check(
+        TopLevelMode::Global,
+        r#"
+          () => {
+            return {};
+          }
+        "#,
+        "()=>({})",
+    );
+    check(
+        TopLevelMode::Global,
+        r#"
+          () => ({});
+        "#,
+        "()=>({})",
+    );
+}
