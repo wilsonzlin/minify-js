@@ -875,6 +875,8 @@ fn emit_js_under_operator<T: Write>(
                 emit_js(out, map, *default)?;
                 if names.is_some() {
                     out.write_all(b",")?;
+                } else {
+                    out.write_all(b" ")?;
                 };
             };
             emit_import_or_export_statement_trailer(out, map, names.as_ref(), Some(module))?;
