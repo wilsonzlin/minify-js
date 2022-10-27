@@ -654,6 +654,9 @@ fn emit_js_under_operator<T: Write>(
             emit_js(out, map, *module)?;
             out.write_all(b")")?;
         }
+        Syntax::ImportMeta {} => {
+            out.write_all(b"import.meta")?;
+        }
         Syntax::LiteralArrayExpr { elements } => {
             out.write_all(b"[")?;
             for (i, e) in elements.iter().enumerate() {
