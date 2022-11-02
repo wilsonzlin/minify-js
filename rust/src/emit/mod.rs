@@ -657,6 +657,59 @@ fn emit_js_under_operator<T: Write>(
         Syntax::ImportMeta {} => {
             out.write_all(b"import.meta")?;
         }
+        Syntax::JsxAttribute { name, value } => {
+            emit_js(out, map, *name)?;
+            if let Some(value) = value {
+                out.write_all(b"=")?;
+                emit_js(out, map, *value)?;
+            }
+        }
+        Syntax::JsxElement {
+            name,
+            attributes,
+            children,
+        } => {
+            out.write_all(b"<")?;
+            emit_js(out, map, *name)?;
+            for attr in attributes {
+                out.write_all(b" ")?;
+                emit_js(out, map, *attr)?;
+            }
+            if children.is_empty() {
+                out.write_all(b"/>")?;
+            } else {
+                out.write_all(b">")?;
+                for child in children {
+                    emit_js(out, map, *child)?;
+                }
+                out.write_all(b"<")?;
+                emit_js(out, map, *name)?;
+                out.write_all(b">")?;
+            }
+        }
+        Syntax::JsxExpressionContainer { value } => {
+            out.write_all(b"{")?;
+            emit_js(out, map, *value)?;
+            out.write_all(b"}")?;
+        }
+        Syntax::JsxMember { path } => {
+            for (i, c) in path.iter().enumerate() {
+                if i > 0 {
+                    out.write_all(b".")?;
+                }
+                out.write_all(c.as_slice())?;
+            }
+        }
+        Syntax::JsxName { namespace, name } => {
+            if let Some(namespace) = namespace {
+                out.write_all(namespace.as_slice())?;
+                out.write_all(b":")?;
+            }
+            out.write_all(name.as_slice())?;
+        }
+        Syntax::JsxText { value } => {
+            out.write_all(value.as_slice())?;
+        }
         Syntax::LiteralArrayExpr { elements } => {
             out.write_all(b"[")?;
             for (i, e) in elements.iter().enumerate() {

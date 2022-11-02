@@ -14,4 +14,4 @@ version = "0.2.10"
 
 [dependencies]
 lazy_static = "1.4"
-parse-js = "0.3.2"
+parse-js = "0.3.4"

@@ -18,6 +18,7 @@ Comparison with esbuild, run on [common libraries](./bench).
 ## Features
 
 - Fast parsing powered by SIMD instructions and lookup tables.
+- Supports JSX.
 - Minification of identifiers.
 - Omits semicolons, spaces, parentheses, and braces where possible.
 
