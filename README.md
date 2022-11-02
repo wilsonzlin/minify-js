@@ -13,7 +13,7 @@ Extremely fast JavaScript minifier, written in Rust.
 
 Comparison with esbuild, run on [common libraries](./bench).
 
-<img width="400" alt="Chart showing speed of JS minifiers" src="https://static.wilsonl.in/minify-js/bench/0.2.10/total-times.svg"><img width="400" alt="Chart showing compression of JS minifiers" src="https://static.wilsonl.in/minify-js/bench/0.2.10/average-sizes.svg">
+<img width="400" alt="Chart showing speed of JS minifiers" src="https://static.wilsonl.in/minify-js/bench/0.2.11/total-times.svg"><img width="400" alt="Chart showing compression of JS minifiers" src="https://static.wilsonl.in/minify-js/bench/0.2.11/average-sizes.svg">
 
 ## Features
 
@@ -28,9 +28,9 @@ Comparison with esbuild, run on [common libraries](./bench).
 
 Precompiled binaries are available for Linux, macOS, and Windows.
 
-[Linux x64](https://static.wilsonl.in/minify-js/cli/0.2.10/linux-x86_64/minify-js) |
-[macOS x64](https://static.wilsonl.in/minify-js/cli/0.2.10/macos-x86_64/minify-js) |
-[Windows x64](https://static.wilsonl.in/minify-js/cli/0.2.10/windows-x86_64/minify-js.exe)
+[Linux x64](https://static.wilsonl.in/minify-js/cli/0.2.11/linux-x86_64/minify-js) |
+[macOS x64](https://static.wilsonl.in/minify-js/cli/0.2.11/macos-x86_64/minify-js) |
+[Windows x64](https://static.wilsonl.in/minify-js/cli/0.2.11/windows-x86_64/minify-js.exe)
 
 Use the `--help` argument for more details.
 
@@ -44,7 +44,7 @@ Add the dependency:
 
 ```toml
 [dependencies]
-minify-js = "0.2.10"
+minify-js = "0.2.11"
 ```
 
 Call the method:
