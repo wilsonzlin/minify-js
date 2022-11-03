@@ -670,7 +670,9 @@ fn emit_js_under_operator<T: Write>(
             children,
         } => {
             out.write_all(b"<")?;
-            emit_js(out, map, *name)?;
+            if let Some(name) = name {
+                emit_js(out, map, *name)?;
+            }
             for attr in attributes {
                 out.write_all(b" ")?;
                 emit_js(out, map, *attr)?;
@@ -682,8 +684,10 @@ fn emit_js_under_operator<T: Write>(
                 for child in children {
                     emit_js(out, map, *child)?;
                 }
-                out.write_all(b"<")?;
-                emit_js(out, map, *name)?;
+                out.write_all(b"</")?;
+                if let Some(name) = name {
+                    emit_js(out, map, *name)?;
+                }
                 out.write_all(b">")?;
             }
         }
@@ -692,11 +696,10 @@ fn emit_js_under_operator<T: Write>(
             emit_js(out, map, *value)?;
             out.write_all(b"}")?;
         }
-        Syntax::JsxMember { path } => {
-            for (i, c) in path.iter().enumerate() {
-                if i > 0 {
-                    out.write_all(b".")?;
-                }
+        Syntax::JsxMember { base, path } => {
+            out.write_all(base.as_slice())?;
+            for c in path {
+                out.write_all(b".")?;
                 out.write_all(c.as_slice())?;
             }
         }

@@ -132,7 +132,8 @@ impl<'a> Visitor for MinifyVisitor<'a> {
             }
             stx @ (Syntax::IdentifierPattern { name }
             | Syntax::IdentifierExpr { name }
-            | Syntax::ClassOrFunctionName { name }) => {
+            | Syntax::ClassOrFunctionName { name }
+            | Syntax::JsxMember { base: name, .. }) => {
                 let sym = scope.find_symbol(self.scopes, name);
                 if let Some(sym) = sym {
                     let minified = generate_minified_name(sym.minified_name_id());
@@ -149,6 +150,10 @@ impl<'a> Visitor for MinifyVisitor<'a> {
                             },
                             Syntax::ClassOrFunctionName { .. } => Syntax::ClassOrFunctionName {
                                 name: minified.clone(),
+                            },
+                            Syntax::JsxMember { path, .. } => Syntax::JsxMember {
+                                base: minified.clone(),
+                                path: path.clone(),
                             },
                             _ => unreachable!(),
                         },
