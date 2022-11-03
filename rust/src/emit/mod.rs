@@ -710,6 +710,11 @@ fn emit_js_under_operator<T: Write>(
             }
             out.write_all(name.as_slice())?;
         }
+        Syntax::JsxSpreadAttribute { value } => {
+            out.write_all(b"{...")?;
+            emit_js(out, map, *value)?;
+            out.write_all(b"}")?;
+        }
         Syntax::JsxText { value } => {
             out.write_all(value.as_slice())?;
         }

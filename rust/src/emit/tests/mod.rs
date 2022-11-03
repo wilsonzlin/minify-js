@@ -214,3 +214,20 @@ fn test_emit_nested_blockless_statements() {
         "function fn(a,b){if(a)if(b)try{c()}catch(c){e(f)}else g=h}",
     );
 }
+
+#[test]
+fn test_emit_jsx() {
+    check(
+        TopLevelMode::Module,
+        r#"
+      import CompImp from "./comp";
+
+      let div = {a:"div"};
+
+      const CompLocal = () => <div.a><strong/></div.a>;
+
+      render(<CompImp><CompLocal/></CompImp>);
+    "#,
+        r#"import Ƽa from"./comp";let b={a:"div"};const Ƽc=()=><b.a><strong/></b.a>;render(<Ƽa><Ƽc/></Ƽa>)"#,
+    );
+}

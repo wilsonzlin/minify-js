@@ -6,11 +6,12 @@ use parse_js::{
     char::{ID_CONTINUE_CHARSTR, ID_START_CHARSTR},
     lex::KEYWORD_STRS,
     source::SourceRange,
-    symbol::{ScopeId, ScopeMap},
+    symbol::{ScopeId, ScopeMap, SymbolMap},
     update::NodeUpdates,
     visit::{JourneyControls, Visitor},
 };
 
+const JSX_COMPONENT_NAME_PREFIX: char = '\u{01BC}';
 const ALT_MINIFIED_NAMES: &'static [char] = &[
     '\u{01BB}', '\u{02B0}', '\u{02B1}', '\u{02B2}', '\u{02B3}', '\u{02B4}', '\u{02B5}', '\u{02B6}',
     '\u{02B7}', '\u{02B8}', '\u{02B9}', '\u{02BA}', '\u{02BB}', '\u{02BC}', '\u{02BD}', '\u{02BE}',
@@ -20,40 +21,91 @@ const ALT_MINIFIED_NAMES: &'static [char] = &[
     '\u{0559}', '\u{0640}', '\u{06E5}', '\u{06E6}', '\u{07F4}', '\u{07F5}', '\u{07FA}',
 ];
 
-fn generate_minified_name(mut id: usize) -> SourceRange {
-    let mut name = vec![ID_START_CHARSTR[id % ID_START_CHARSTR.len()]];
-    if id >= ID_START_CHARSTR.len() {
-        id /= ID_START_CHARSTR.len();
-        while id >= ID_CONTINUE_CHARSTR.len() {
-            name.push(ID_CONTINUE_CHARSTR[id % ID_CONTINUE_CHARSTR.len()]);
-            id /= ID_CONTINUE_CHARSTR.len();
-        }
-        name.push(ID_CONTINUE_CHARSTR[id % ID_CONTINUE_CHARSTR.len()]);
-    };
-    if let Some(alt_id) = KEYWORD_STRS.get(name.as_slice()) {
-        // This name is a keyword, so we replace it with a Unicode character instead.
-        // This Unicode character is 2 bytes when encoded in UTF-8, so it's more than minimal enough. UTF-8 encodes U+0080 to U+07FF in 2 bytes.
-        // There should be exactly one ALT_MINIFIED_NAMES element for each KEYWORD_STRS entry.
-        // Using a Unicode name will ensure no chance of clashing with keywords, well-knowns, and almost all variables.
-        // Clashes can appear quickly e.g. `in`, `of`, `if`.
-        // TODO This could still clash with an untracked or unminified variable; however, that's technically true of any minified name.
-        let s = ALT_MINIFIED_NAMES[*alt_id].encode_utf8(&mut name).len();
-        name.truncate(s);
-    };
-    SourceRange::anonymous(name)
-}
-
 struct ExportBinding {
     target: SourceRange,
     alias: SourceRange,
 }
 
-struct MinifyVisitor<'a> {
-    scopes: &'a ScopeMap,
+#[derive(Default)]
+struct MinifySymbol {
+    // Set to 0 initially, before minification pass. WARNING: 0 is still a valid value, so do not use before setting.
+    minified_name_id: usize,
+    is_used_as_jsx_component: bool,
+}
+
+impl MinifySymbol {
+    fn set_minified_name_id(&mut self, id: usize) {
+        self.minified_name_id = id;
+    }
+
+    fn mark_as_used_as_jsx_component(&mut self) {
+        self.is_used_as_jsx_component = true;
+    }
+
+    fn generate_minified_name(&self) -> SourceRange {
+        let mut id = self.minified_name_id;
+        let mut name = Vec::<u8>::new();
+        // See main function at bottom for why we do this.
+        if self.is_used_as_jsx_component {
+            name.extend(b"  ");
+            JSX_COMPONENT_NAME_PREFIX.encode_utf8(&mut name[0..2]);
+        }
+        name.push(ID_START_CHARSTR[id % ID_START_CHARSTR.len()]);
+        if id >= ID_START_CHARSTR.len() {
+            id /= ID_START_CHARSTR.len();
+            while id >= ID_CONTINUE_CHARSTR.len() {
+                name.push(ID_CONTINUE_CHARSTR[id % ID_CONTINUE_CHARSTR.len()]);
+                id /= ID_CONTINUE_CHARSTR.len();
+            }
+            name.push(ID_CONTINUE_CHARSTR[id % ID_CONTINUE_CHARSTR.len()]);
+        };
+        if let Some(alt_id) = KEYWORD_STRS.get(name.as_slice()) {
+            // This name is a keyword, so we replace it with a Unicode character instead.
+            // This Unicode character is 2 bytes when encoded in UTF-8, so it's more than minimal enough. UTF-8 encodes U+0080 to U+07FF in 2 bytes.
+            // There should be exactly one ALT_MINIFIED_NAMES element for each KEYWORD_STRS entry.
+            // Using a Unicode name will ensure no chance of clashing with keywords, well-knowns, and almost all variables.
+            // Clashes can appear quickly e.g. `in`, `of`, `if`.
+            // TODO This could still clash with an untracked or unminified variable; however, that's technically true of any minified name.
+            let s = ALT_MINIFIED_NAMES[*alt_id].encode_utf8(&mut name).len();
+            name.truncate(s);
+        };
+        SourceRange::anonymous(name)
+    }
+}
+
+// See main function at bottom for why we need this.
+struct JsxVisitor<'a> {
     nodes: &'a NodeMap,
-    updates: &'a mut NodeUpdates,
+    scopes: &'a ScopeMap,
+    symbols: &'a mut SymbolMap<MinifySymbol>,
+}
+
+impl<'a> Visitor for JsxVisitor<'a> {
+    fn on_syntax(&mut self, _parent_node: NodeId, node: NodeId, ctl: &mut JourneyControls) -> () {
+        let n = &self.nodes[node];
+        match n.stx() {
+            Syntax::JsxName {
+                namespace: None,
+                name,
+            } if !name.as_slice()[0].is_ascii_lowercase() => {
+                // TODO Warn if symbol not found.
+                let sym = self.scopes[n.scope()]
+                    .find_symbol(self.scopes, name)
+                    .unwrap();
+                self.symbols[sym].mark_as_used_as_jsx_component();
+            }
+            _ => {}
+        }
+    }
+}
+
+struct MinifyVisitor<'a> {
     // Exports with the same exported name (including multiple default exports) are illegal, so we don't have to worry about/handle that case.
     export_bindings: &'a mut Vec<ExportBinding>,
+    nodes: &'a NodeMap,
+    scopes: &'a ScopeMap,
+    symbols: &'a mut SymbolMap<MinifySymbol>,
+    updates: &'a mut NodeUpdates,
 }
 
 impl<'a> MinifyVisitor<'a> {
@@ -133,10 +185,15 @@ impl<'a> Visitor for MinifyVisitor<'a> {
             stx @ (Syntax::IdentifierPattern { name }
             | Syntax::IdentifierExpr { name }
             | Syntax::ClassOrFunctionName { name }
-            | Syntax::JsxMember { base: name, .. }) => {
+            | Syntax::JsxMember { base: name, .. }
+            | Syntax::JsxName {
+                name,
+                namespace: None,
+            }) => {
                 let sym = scope.find_symbol(self.scopes, name);
+                // TODO JsxMember and JsxNamespacedName must be capitalised to be interpreted as a component.
                 if let Some(sym) = sym {
-                    let minified = generate_minified_name(sym.minified_name_id());
+                    let minified = self.symbols[sym].generate_minified_name();
                     self.updates.replace_node(
                         node,
                         scope_id,
@@ -154,6 +211,10 @@ impl<'a> Visitor for MinifyVisitor<'a> {
                             Syntax::JsxMember { path, .. } => Syntax::JsxMember {
                                 base: minified.clone(),
                                 path: path.clone(),
+                            },
+                            Syntax::JsxName { namespace, .. } => Syntax::JsxName {
+                                namespace: namespace.clone(),
+                                name: minified.clone(),
                             },
                             _ => unreachable!(),
                         },
@@ -229,7 +290,7 @@ impl<'a> Visitor for MinifyVisitor<'a> {
                         if target.is_none() {
                             let sym = scope.find_symbol(self.scopes, name);
                             if let Some(sym) = sym {
-                                let minified = generate_minified_name(sym.minified_name_id());
+                                let minified = self.symbols[sym].generate_minified_name();
                                 let replacement_target_node = self.updates.create_node(
                                     scope_id,
                                     minified.clone(),
@@ -258,7 +319,7 @@ impl<'a> Visitor for MinifyVisitor<'a> {
                     ObjectMemberType::Shorthand { name } => {
                         let sym = scope.find_symbol(self.scopes, name);
                         if let Some(sym) = sym {
-                            let minified = generate_minified_name(sym.minified_name_id());
+                            let minified = self.symbols[sym].generate_minified_name();
                             let replacement_initializer_node = self.updates.create_node(
                                 scope_id,
                                 minified.clone(),
@@ -295,6 +356,7 @@ pub fn minify_js(
     top_level_scope_id: ScopeId,
     top_level_node_id: NodeId,
 ) -> () {
+    let mut symbols: SymbolMap<MinifySymbol> = SymbolMap::<MinifySymbol>::new(&scope_map);
     // We need these since we cannot look up in scope_map while mutably borrowed by iter_mut().
     let symbol_counts: Vec<usize> = scope_map.iter().map(|s| s.symbol_count()).collect();
     let mut minified_name_starts: Vec<usize> = vec![0; scope_map.len()];
@@ -305,11 +367,20 @@ pub fn minify_js(
             Some(p) => symbol_counts[p.id()] + minified_name_starts[p.id()],
             None => 0,
         };
-        scope.symbols_update(|no, symbol| {
-            symbol.set_minified_name_id(minified_name_start + no);
-        });
+        for symbol_id in scope.symbols_iter() {
+            symbols[symbol_id]
+                .set_minified_name_id(minified_name_start + symbol_id.ordinal_in_scope())
+        }
         minified_name_starts[id] = minified_name_start;
     }
+
+    // Since React requires that non-namespaced JSX elements that refer to a JS component must never start with a lowercase letter (otherwise it will always be interpreted as an HTML tag, even if a same-named variable is in scope), we must detect all usages and prefix them with a unique non-lowercase character JSX_COMPONENT_NAME_PREFIX (this is the simplest solution given how we currently minify identifiers). Since we can't know which variables are used as such (for the same reason we cannot minify while parsing in the same step i.e. due to forward references across scopes), we must run a separate pass after parsing and before minifying.
+    let mut jsx_visitor = JsxVisitor {
+        nodes: node_map,
+        scopes: scope_map,
+        symbols: &mut symbols,
+    };
+    jsx_visitor.visit_top_level(node_map, top_level_node_id);
 
     let mut export_bindings = Vec::new();
     let mut updates = NodeUpdates::new(node_map);
@@ -317,6 +388,7 @@ pub fn minify_js(
         export_bindings: &mut export_bindings,
         nodes: node_map,
         scopes: scope_map,
+        symbols: &mut symbols,
         updates: &mut updates,
     };
     visitor.visit_top_level(node_map, top_level_node_id);
@@ -324,12 +396,10 @@ pub fn minify_js(
     let export_names = export_bindings
         .iter()
         .map(|e| ExportName {
-            target: generate_minified_name(
-                scope_map[top_level_scope_id]
-                    .find_symbol(scope_map, &e.target)
-                    .expect(format!("failed to find top-level export `{:?}`", e.target).as_str())
-                    .minified_name_id(),
-            ),
+            target: (symbols[scope_map[top_level_scope_id]
+                .find_symbol(scope_map, &e.target)
+                .expect(format!("failed to find top-level export `{:?}`", e.target).as_str())]
+            .generate_minified_name()),
             alias: node_map.create_node(
                 top_level_scope_id,
                 e.alias.clone(),
