@@ -88,11 +88,12 @@ impl<'a> Visitor for JsxVisitor<'a> {
                 namespace: None,
                 name,
             } if !name.as_slice()[0].is_ascii_lowercase() => {
-                // TODO Warn if symbol not found.
-                let sym = self.scopes[n.scope()]
-                    .find_symbol(self.scopes, name)
-                    .unwrap();
-                self.symbols[sym].mark_as_used_as_jsx_component();
+                match self.scopes[n.scope()].find_symbol(self.scopes, name) {
+                    Some(sym) => self.symbols[sym].mark_as_used_as_jsx_component(),
+                    None => {
+                        // TODO Warn if symbol not found.
+                    }
+                };
             }
             _ => {}
         }
