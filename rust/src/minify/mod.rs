@@ -160,6 +160,7 @@ impl<'a> Visitor for MinifyVisitor<'a> {
         let scope = &self.scopes[scope_id];
         match self.nodes[node].stx() {
             Syntax::ArrowFunctionExpr {
+                parenthesised,
                 is_async,
                 signature,
                 body,
@@ -173,6 +174,7 @@ impl<'a> Visitor for MinifyVisitor<'a> {
                                     scope_id,
                                     self.nodes[node].loc().clone(),
                                     Syntax::ArrowFunctionExpr {
+                                        parenthesised: *parenthesised,
                                         is_async: *is_async,
                                         signature: *signature,
                                         body: *return_value,

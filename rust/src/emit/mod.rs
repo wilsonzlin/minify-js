@@ -324,7 +324,8 @@ fn emit_js_under_operator<T: Write>(
 ) -> io::Result<()> {
     match map[node_id].stx() {
         Syntax::EmptyStmt {} => {}
-        Syntax::LiteralBooleanExpr { .. }
+        Syntax::LiteralBigIntExpr { .. }
+        | Syntax::LiteralBooleanExpr { .. }
         | Syntax::LiteralNumberExpr { .. }
         | Syntax::LiteralRegexExpr { .. }
         | Syntax::LiteralStringExpr { .. } => {
@@ -469,10 +470,16 @@ fn emit_js_under_operator<T: Write>(
             }
         }
         Syntax::ArrowFunctionExpr {
+            parenthesised,
             is_async,
             signature,
             body,
         } => {
+            // See FunctionExpr.
+            // TODO Omit parentheses if possible.
+            if *parenthesised {
+                out.write_all(b"(")?;
+            }
             if *is_async {
                 out.write_all(b"async")?;
             }
@@ -511,6 +518,10 @@ fn emit_js_under_operator<T: Write>(
             };
             emit_js(out, map, *body)?;
             if let Syntax::LiteralObjectExpr { .. } = map[*body].stx() {
+                out.write_all(b")")?;
+            };
+            // TODO Omit parentheses if possible.
+            if *parenthesised {
                 out.write_all(b")")?;
             };
         }
