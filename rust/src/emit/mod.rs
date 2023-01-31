@@ -513,11 +513,16 @@ fn emit_js_under_operator<T: Write>(
                 out.write_all(b")")?;
             };
             out.write_all(b"=>")?;
-            if let Syntax::LiteralObjectExpr { .. } = map[*body].stx() {
+            let must_parenthesise_body = match map[*body].stx() {
+              Syntax::LiteralObjectExpr { .. } => true,
+              Syntax::BinaryExpr { operator, .. } if *operator == OperatorName::Comma => true,
+              _ => false,
+            };
+            if must_parenthesise_body {
                 out.write_all(b"(")?;
             };
             emit_js(out, map, *body)?;
-            if let Syntax::LiteralObjectExpr { .. } = map[*body].stx() {
+            if must_parenthesise_body {
                 out.write_all(b")")?;
             };
             // TODO Omit parentheses if possible.
