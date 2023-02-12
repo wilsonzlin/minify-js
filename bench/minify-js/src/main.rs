@@ -3,7 +3,6 @@ use minify_js::Session;
 use minify_js::TopLevelMode;
 use std::env;
 use std::fs::File;
-use std::io::BufWriter;
 use std::io::Read;
 use std::time::Instant;
 
@@ -17,13 +16,13 @@ fn main() {
 
   let iterations = u64::from_str_radix(&args[2], 10).expect("parse iterations argument");
   let mut output_len = 0;
-  let mut output = BufWriter::new(Vec::new());
+  let mut output = Vec::new();
   let started = Instant::now();
   let session = Session::new();
   for _ in 0..iterations {
-    output.get_mut().clear();
+    output.clear();
     minify(&session, TopLevelMode::Global, &code, &mut output).expect("minify");
-    output_len = output.get_ref().len();
+    output_len = output.len();
   }
   let elapsed_ns = started.elapsed().as_nanos();
 

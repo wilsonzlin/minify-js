@@ -34,11 +34,14 @@ fn main() {
     None => Box::new(stdin()),
   };
   input_file.read_to_end(&mut input).expect("read input");
-  let out_file: Box<dyn Write> = match args.output {
-    Some(p) => Box::new(File::create(p).expect("open output file")),
-    None => Box::new(stdout()),
-  };
-  let mut output = BufWriter::new(out_file);
+  let mut output = Vec::new();
   let session = Session::new();
   minify(&session, args.mode, &input, &mut output).expect("minify");
+  match args.output {
+    Some(p) => File::create(p)
+      .expect("open output file")
+      .write_all(&output),
+    None => stdout().write_all(&output),
+  }
+  .expect("write output");
 }

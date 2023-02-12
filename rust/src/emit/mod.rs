@@ -17,8 +17,6 @@ use parse_js::operator::OPERATORS;
 use parse_js::session::SessionString;
 use parse_js::session::SessionVec;
 use std::collections::HashMap;
-use std::io;
-use std::io::Write;
 
 #[cfg(test)]
 mod tests;
@@ -98,27 +96,27 @@ lazy_static! {
 }
 
 // Returns whether or not the value is a property.
-fn emit_class_or_object_member<'a, T: Write>(
-  out: &mut T,
+fn emit_class_or_object_member<'a>(
+  out: &mut Vec<u8>,
   key: &'a ClassOrObjectMemberKey,
   value: &'a ClassOrObjectMemberValue,
   value_delimiter: &'static [u8],
-) -> io::Result<bool> {
+) -> bool {
   let is_computed_key = match key {
     ClassOrObjectMemberKey::Computed(_) => true,
     _ => false,
   };
   match value {
     ClassOrObjectMemberValue::Getter { .. } => {
-      out.write_all(b"get")?;
+      out.extend_from_slice(b"get");
       if !is_computed_key {
-        out.write_all(b" ")?;
+        out.extend_from_slice(b" ");
       };
     }
     ClassOrObjectMemberValue::Setter { .. } => {
-      out.write_all(b"set")?;
+      out.extend_from_slice(b"set");
       if !is_computed_key {
-        out.write_all(b" ")?;
+        out.extend_from_slice(b" ");
       };
     }
     ClassOrObjectMemberValue::Method {
@@ -127,132 +125,130 @@ fn emit_class_or_object_member<'a, T: Write>(
       ..
     } => {
       if *is_async {
-        out.write_all(b"async")?;
+        out.extend_from_slice(b"async");
       }
       if *generator {
-        out.write_all(b"*")?;
+        out.extend_from_slice(b"*");
       } else if *is_async {
-        out.write_all(b" ")?;
+        out.extend_from_slice(b" ");
       }
     }
     _ => {}
   };
   match key {
     ClassOrObjectMemberKey::Direct(name) => {
-      out.write_all(name.as_slice())?;
+      out.extend_from_slice(name.as_slice());
     }
     ClassOrObjectMemberKey::Computed(expr) => {
-      out.write_all(b"[")?;
-      emit_js(out, *expr)?;
-      out.write_all(b"]")?;
+      out.extend_from_slice(b"[");
+      emit_js(out, *expr);
+      out.extend_from_slice(b"]");
     }
   };
   match value {
     ClassOrObjectMemberValue::Getter { body } => {
-      out.write_all(b"()")?;
-      emit_js(out, *body)?;
+      out.extend_from_slice(b"()");
+      emit_js(out, *body);
     }
     ClassOrObjectMemberValue::Method {
       signature, body, ..
     } => {
-      out.write_all(b"(")?;
-      emit_js(out, *signature)?;
-      out.write_all(b")")?;
-      emit_js(out, *body)?;
+      out.extend_from_slice(b"(");
+      emit_js(out, *signature);
+      out.extend_from_slice(b")");
+      emit_js(out, *body);
     }
     ClassOrObjectMemberValue::Property { initializer } => {
       if let Some(v) = initializer {
-        out.write_all(value_delimiter)?;
-        emit_js(out, *v)?;
+        out.extend_from_slice(value_delimiter);
+        emit_js(out, *v);
       };
     }
     ClassOrObjectMemberValue::Setter { body, parameter } => {
-      out.write_all(b"(")?;
-      emit_js(out, *parameter)?;
-      out.write_all(b")")?;
-      emit_js(out, *body)?;
+      out.extend_from_slice(b"(");
+      emit_js(out, *parameter);
+      out.extend_from_slice(b")");
+      emit_js(out, *body);
     }
   };
 
-  Ok(match value {
+  match value {
     ClassOrObjectMemberValue::Property { .. } => true,
     _ => false,
-  })
+  }
 }
 
-fn emit_class<'a, T: Write>(
-  out: &mut T,
+fn emit_class<'a>(
+  out: &mut Vec<u8>,
   name: Option<Node<'a>>,
   extends: Option<Node<'a>>,
   members: &SessionVec<'a, ClassMember<'a>>,
-) -> io::Result<()> {
-  out.write_all(b"class")?;
+) -> () {
+  out.extend_from_slice(b"class");
   if let Some(n) = name {
-    out.write_all(b" ")?;
-    emit_js(out, n)?;
+    out.extend_from_slice(b" ");
+    emit_js(out, n);
   }
   if let Some(s) = extends {
-    out.write_all(b" extends ")?;
-    emit_js(out, s)?;
+    out.extend_from_slice(b" extends ");
+    emit_js(out, s);
   }
-  out.write_all(b"{")?;
+  out.extend_from_slice(b"{");
   let mut last_member_was_property = false;
   for (i, m) in members.iter().enumerate() {
     if i > 0 && last_member_was_property {
-      out.write_all(b";")?;
+      out.extend_from_slice(b";");
     }
     if m.statik {
-      out.write_all(b"static ")?;
+      out.extend_from_slice(b"static ");
     }
-    last_member_was_property = emit_class_or_object_member(out, &m.key, &m.value, b"=")?;
+    last_member_was_property = emit_class_or_object_member(out, &m.key, &m.value, b"=");
   }
-  out.write_all(b"}")?;
-  Ok(())
+  out.extend_from_slice(b"}");
 }
 
-fn emit_import_or_export_statement_trailer<'a, T: Write>(
-  out: &mut T,
+fn emit_import_or_export_statement_trailer<'a>(
+  out: &mut Vec<u8>,
   names: Option<&ExportNames<'a>>,
   from: Option<&SessionString<'a>>,
-) -> io::Result<()> {
+) -> () {
   match names {
     Some(ExportNames::All(alias)) => {
-      out.write_all(b"*")?;
+      out.extend_from_slice(b"*");
       if let Some(alias) = alias {
-        out.write_all(b"as ")?;
-        emit_js(out, *alias)?;
+        out.extend_from_slice(b"as ");
+        emit_js(out, *alias);
         if from.is_some() {
-          out.write_all(b" ")?;
+          out.extend_from_slice(b" ");
         }
       };
     }
     Some(ExportNames::Specific(names)) => {
-      out.write_all(b"{")?;
+      out.extend_from_slice(b"{");
       for (i, e) in names.iter().enumerate() {
         if i > 0 {
-          out.write_all(b",")?;
+          out.extend_from_slice(b",");
         }
-        out.write_all(e.target.as_slice())?;
+        out.extend_from_slice(e.target.as_slice());
         // TODO Omit if identical to `target`.
-        out.write_all(b" as ")?;
-        emit_js(out, e.alias)?;
+        out.extend_from_slice(b" as ");
+        emit_js(out, e.alias);
       }
-      out.write_all(b"}")?;
+      out.extend_from_slice(b"}");
     }
     None => {}
   };
   if let Some(from) = from {
-    out.write_all(b"from\"")?;
+    out.extend_from_slice(b"from\"");
     // TODO Escape?
-    out.write_all(from.as_bytes())?;
-    out.write_all(b"\"")?;
+    out.extend_from_slice(from.as_bytes());
+    out.extend_from_slice(b"\"");
   };
-  Ok(())
 }
 
-pub fn emit_js<'a, T: Write>(out: &mut T, n: Node<'a>) -> io::Result<()> {
-  emit_js_under_operator(out, n, None)?;
-  out.flush()
+// NOTE: We no longer support outputting to a generic Write, as that incurs significant performance overhead (even with a BufWriter<Vec<u8>>) and our parser is not streaming anyway.
+pub fn emit_js<'a>(out: &mut Vec<u8>, n: Node<'a>) -> () {
+  emit_js_under_operator(out, n, None);
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -284,7 +280,7 @@ fn get_leaf_node_type<'a>(n: Node<'a>) -> LeafNodeType {
 // It's important to use this function:
 // - Omit semicolons where possible.
 // - Insert semicolon after last statement if its leaf is a `if`, `for`, `while`, or `with` statement with an empty statement as its body e.g. `if (x) label: for (;;) while (x)` but not `if (x) for (;;) label: while (x) {}` or `if (x) for (;;) label: while (x) return`.
-fn emit_statements<'a, T: Write>(out: &mut T, statements: &[Node<'a>]) -> io::Result<()> {
+fn emit_statements<'a>(out: &mut Vec<u8>, statements: &[Node<'a>]) -> () {
   // Since we skip over some statements, the last actual statement may not be the last in the list.
   let mut last_statement: Option<Node<'a>> = None;
   for n in statements {
@@ -292,19 +288,18 @@ fn emit_statements<'a, T: Write>(out: &mut T, statements: &[Node<'a>]) -> io::Re
       match &*n.stx() {
         Syntax::EmptyStmt {} | Syntax::FunctionDecl { .. } | Syntax::ClassDecl { .. } => {}
         _ => {
-          out.write_all(b";")?;
+          out.extend_from_slice(b";");
         }
       }
     }
-    emit_js(out, *n)?;
+    emit_js(out, *n);
     last_statement = Some(*n);
   }
   if let Some(n) = last_statement {
     if get_leaf_node_type(n) == LeafNodeType::EmptyStmt {
-      out.write_all(b";")?;
+      out.extend_from_slice(b";");
     }
   }
-  Ok(())
 }
 
 /*
@@ -323,11 +318,11 @@ For `do <stmt> while (...)` and `if <stmt> else (...)`, when does a semicolon ne
 - do for (;;) while (y) if (z) {} while (a);
 */
 
-fn emit_js_under_operator<'a, T: Write>(
-  out: &mut T,
+fn emit_js_under_operator<'a>(
+  out: &mut Vec<u8>,
   node: Node<'a>,
   parent_operator_precedence: Option<u8>,
-) -> io::Result<()> {
+) -> () {
   match &*node.stx() {
     Syntax::EmptyStmt {} => {}
     Syntax::LiteralBigIntExpr { .. }
@@ -335,99 +330,99 @@ fn emit_js_under_operator<'a, T: Write>(
     | Syntax::LiteralNumberExpr { .. }
     | Syntax::LiteralRegexExpr { .. }
     | Syntax::LiteralStringExpr { .. } => {
-      out.write_all(node.loc().as_slice())?;
+      out.extend_from_slice(node.loc().as_slice());
     }
     Syntax::LiteralTemplateExpr { parts } => {
-      out.write_all(b"`")?;
+      out.extend_from_slice(b"`");
       for p in parts {
         match p {
           LiteralTemplatePart::Substitution(sub) => {
-            out.write_all(b"${")?;
-            emit_js(out, *sub)?;
-            out.write_all(b"}")?;
+            out.extend_from_slice(b"${");
+            emit_js(out, *sub);
+            out.extend_from_slice(b"}");
           }
           LiteralTemplatePart::String(str) => {
-            out.write_all(str.as_slice())?;
+            out.extend_from_slice(str.as_slice());
           }
         }
       }
-      out.write_all(b"`")?;
+      out.extend_from_slice(b"`");
     }
     Syntax::VarDecl { mode, declarators } => {
-      out.write_all(match mode {
+      out.extend_from_slice(match mode {
         VarDeclMode::Const => b"const",
         VarDeclMode::Let => b"let",
         VarDeclMode::Var => b"var",
-      })?;
-      out.write_all(b" ")?;
+      });
+      out.extend_from_slice(b" ");
       for (i, decl) in declarators.iter().enumerate() {
         if i > 0 {
-          out.write_all(b",")?;
+          out.extend_from_slice(b",");
         }
-        emit_js(out, decl.pattern)?;
+        emit_js(out, decl.pattern);
         if let Some(expr) = &decl.initializer {
-          out.write_all(b"=")?;
+          out.extend_from_slice(b"=");
           // This is only really done for the Comma operator, which is the only operator below Assignment.
           let operator = &OPERATORS[&OperatorName::Assignment];
-          emit_js_under_operator(out, *expr, Some(operator.precedence))?;
+          emit_js_under_operator(out, *expr, Some(operator.precedence));
         };
       }
     }
     Syntax::VarStmt { declaration } => {
-      emit_js(out, *declaration)?;
+      emit_js(out, *declaration);
     }
     Syntax::IdentifierPattern { name } => {
-      out.write_all(name.as_slice())?;
+      out.extend_from_slice(name.as_slice());
     }
     Syntax::ArrayPattern { elements, rest } => {
-      out.write_all(b"[")?;
+      out.extend_from_slice(b"[");
       for (i, e) in elements.iter().enumerate() {
         if i > 0 {
-          out.write_all(b",")?;
+          out.extend_from_slice(b",");
         }
         if let Some(e) = e {
-          emit_js(out, e.target)?;
+          emit_js(out, e.target);
           if let Some(v) = &e.default_value {
-            out.write_all(b"=")?;
-            emit_js(out, *v)?;
+            out.extend_from_slice(b"=");
+            emit_js(out, *v);
           }
         };
       }
       if let Some(r) = rest {
         if !elements.is_empty() {
-          out.write_all(b",")?;
+          out.extend_from_slice(b",");
         }
-        out.write_all(b"...")?;
-        emit_js(out, *r)?;
+        out.extend_from_slice(b"...");
+        emit_js(out, *r);
       };
-      out.write_all(b"]")?;
+      out.extend_from_slice(b"]");
     }
     Syntax::ObjectPattern { properties, rest } => {
-      out.write_all(b"{")?;
+      out.extend_from_slice(b"{");
       for (i, e) in properties.iter().enumerate() {
         if i > 0 {
-          out.write_all(b",")?;
+          out.extend_from_slice(b",");
         }
-        emit_js(out, *e)?;
+        emit_js(out, *e);
       }
       if let Some(r) = rest {
         if !properties.is_empty() {
-          out.write_all(b",")?;
+          out.extend_from_slice(b",");
         }
-        out.write_all(b"...")?;
-        emit_js(out, *r)?;
+        out.extend_from_slice(b"...");
+        emit_js(out, *r);
       };
-      out.write_all(b"}")?;
+      out.extend_from_slice(b"}");
     }
     Syntax::ClassOrFunctionName { name } => {
-      out.write_all(name.as_slice())?;
+      out.extend_from_slice(name.as_slice());
     }
     Syntax::FunctionSignature { parameters } => {
       for (i, p) in parameters.iter().enumerate() {
         if i > 0 {
-          out.write_all(b",")?;
+          out.extend_from_slice(b",");
         };
-        emit_js(out, *p)?;
+        emit_js(out, *p);
       }
     }
     Syntax::ClassDecl {
@@ -435,7 +430,7 @@ fn emit_js_under_operator<'a, T: Write>(
       extends,
       members,
     } => {
-      emit_class(out, *name, *extends, members)?;
+      emit_class(out, *name, *extends, members);
     }
     Syntax::FunctionDecl {
       is_async,
@@ -445,21 +440,21 @@ fn emit_js_under_operator<'a, T: Write>(
       body,
     } => {
       if *is_async {
-        out.write_all(b"async ")?;
+        out.extend_from_slice(b"async ");
       }
-      out.write_all(b"function")?;
+      out.extend_from_slice(b"function");
       if *generator {
-        out.write_all(b"*")?;
+        out.extend_from_slice(b"*");
       } else if name.is_some() {
-        out.write_all(b" ")?;
+        out.extend_from_slice(b" ");
       };
       if let Some(name) = name {
-        emit_js(out, *name)?;
+        emit_js(out, *name);
       }
-      out.write_all(b"(")?;
-      emit_js(out, *signature)?;
-      out.write_all(b")")?;
-      emit_js(out, *body)?;
+      out.extend_from_slice(b"(");
+      emit_js(out, *signature);
+      out.extend_from_slice(b")");
+      emit_js(out, *body);
     }
     Syntax::ParamDecl {
       rest,
@@ -467,12 +462,12 @@ fn emit_js_under_operator<'a, T: Write>(
       default_value,
     } => {
       if *rest {
-        out.write_all(b"...")?;
+        out.extend_from_slice(b"...");
       };
-      emit_js(out, *pattern)?;
+      emit_js(out, *pattern);
       if let Some(v) = default_value {
-        out.write_all(b"=")?;
-        emit_js(out, *v)?;
+        out.extend_from_slice(b"=");
+        emit_js(out, *v);
       }
     }
     Syntax::ArrowFunctionExpr {
@@ -484,10 +479,10 @@ fn emit_js_under_operator<'a, T: Write>(
       // See FunctionExpr.
       // TODO Omit parentheses if possible.
       if *parenthesised {
-        out.write_all(b"(")?;
+        out.extend_from_slice(b"(");
       }
       if *is_async {
-        out.write_all(b"async")?;
+        out.extend_from_slice(b"async");
       }
       let can_omit_parentheses = if let Syntax::FunctionSignature { parameters } = &*signature.stx()
       {
@@ -512,28 +507,28 @@ fn emit_js_under_operator<'a, T: Write>(
         false
       };
       if !can_omit_parentheses {
-        out.write_all(b"(")?;
+        out.extend_from_slice(b"(");
       };
-      emit_js(out, *signature)?;
+      emit_js(out, *signature);
       if !can_omit_parentheses {
-        out.write_all(b")")?;
+        out.extend_from_slice(b")");
       };
-      out.write_all(b"=>")?;
+      out.extend_from_slice(b"=>");
       let must_parenthesise_body = match &*body.stx() {
         Syntax::LiteralObjectExpr { .. } => true,
         Syntax::BinaryExpr { operator, .. } if *operator == OperatorName::Comma => true,
         _ => false,
       };
       if must_parenthesise_body {
-        out.write_all(b"(")?;
+        out.extend_from_slice(b"(");
       };
-      emit_js(out, *body)?;
+      emit_js(out, *body);
       if must_parenthesise_body {
-        out.write_all(b")")?;
+        out.extend_from_slice(b")");
       };
       // TODO Omit parentheses if possible.
       if *parenthesised {
-        out.write_all(b")")?;
+        out.extend_from_slice(b")");
       };
     }
     Syntax::BinaryExpr {
@@ -552,26 +547,26 @@ fn emit_js_under_operator<'a, T: Write>(
         _ => false,
       };
       if must_parenthesise {
-        out.write_all(b"(")?;
+        out.extend_from_slice(b"(");
       };
-      emit_js_under_operator(out, *left, Some(operator.precedence))?;
-      out.write_all(
+      emit_js_under_operator(out, *left, Some(operator.precedence));
+      out.extend_from_slice(
         BINARY_OPERATOR_SYNTAX
           .get(operator_name)
           .unwrap()
           .as_bytes(),
-      )?;
+      );
       match operator_name {
         OperatorName::Addition | OperatorName::Subtraction => {
           // Prevent potential confict with following unary operator e.g. `a+ +b` => `a++b`.
           // TODO Omit when possible.
-          out.write_all(b" ")?;
+          out.extend_from_slice(b" ");
         }
         _ => {}
       };
-      emit_js_under_operator(out, *right, Some(operator.precedence))?;
+      emit_js_under_operator(out, *right, Some(operator.precedence));
       if must_parenthesise {
-        out.write_all(b")")?;
+        out.extend_from_slice(b")");
       };
     }
     Syntax::CallExpr {
@@ -590,23 +585,23 @@ fn emit_js_under_operator<'a, T: Write>(
         _ => false,
       };
       if must_parenthesise {
-        out.write_all(b"(")?;
+        out.extend_from_slice(b"(");
       }
-      emit_js_under_operator(out, *callee, Some(operator.precedence))?;
+      emit_js_under_operator(out, *callee, Some(operator.precedence));
       if *optional_chaining {
-        out.write_all(b"?.")?;
+        out.extend_from_slice(b"?.");
       }
-      out.write_all(b"(")?;
+      out.extend_from_slice(b"(");
       for (i, a) in arguments.iter().enumerate() {
         if i > 0 {
-          out.write_all(b",")?;
+          out.extend_from_slice(b",");
         }
-        emit_js(out, *a)?;
+        emit_js(out, *a);
       }
-      out.write_all(b")")?;
+      out.extend_from_slice(b")");
       // TODO Omit parentheses if possible.
       if must_parenthesise {
-        out.write_all(b")")?;
+        out.extend_from_slice(b")");
       }
     }
     Syntax::ConditionalExpr {
@@ -622,15 +617,15 @@ fn emit_js_under_operator<'a, T: Write>(
         _ => false,
       };
       if must_parenthesise {
-        out.write_all(b"(")?;
+        out.extend_from_slice(b"(");
       };
-      emit_js_under_operator(out, *test, Some(operator.precedence))?;
-      out.write_all(b"?")?;
-      emit_js_under_operator(out, *consequent, Some(operator.precedence))?;
-      out.write_all(b":")?;
-      emit_js_under_operator(out, *alternate, Some(operator.precedence))?;
+      emit_js_under_operator(out, *test, Some(operator.precedence));
+      out.extend_from_slice(b"?");
+      emit_js_under_operator(out, *consequent, Some(operator.precedence));
+      out.extend_from_slice(b":");
+      emit_js_under_operator(out, *alternate, Some(operator.precedence));
       if must_parenthesise {
-        out.write_all(b")")?;
+        out.extend_from_slice(b")");
       };
     }
     Syntax::FunctionExpr {
@@ -644,46 +639,46 @@ fn emit_js_under_operator<'a, T: Write>(
       // We need to keep parentheses to prevent function expressions from being misinterpreted as a function declaration, which cannot be part of an expression e.g. IIFE.
       // TODO Omit parentheses if possible.
       if *parenthesised {
-        out.write_all(b"(")?;
+        out.extend_from_slice(b"(");
       }
       if *is_async {
-        out.write_all(b"async ")?;
+        out.extend_from_slice(b"async ");
       }
-      out.write_all(b"function")?;
+      out.extend_from_slice(b"function");
       if *generator {
-        out.write_all(b"*")?;
+        out.extend_from_slice(b"*");
       };
       if let Some(name) = name {
         if !generator {
-          out.write_all(b" ")?;
+          out.extend_from_slice(b" ");
         };
-        emit_js(out, *name)?;
+        emit_js(out, *name);
       };
-      out.write_all(b"(")?;
-      emit_js(out, *signature)?;
-      out.write_all(b")")?;
-      emit_js(out, *body)?;
+      out.extend_from_slice(b"(");
+      emit_js(out, *signature);
+      out.extend_from_slice(b")");
+      emit_js(out, *body);
       // TODO Omit parentheses if possible.
       if *parenthesised {
-        out.write_all(b")")?;
+        out.extend_from_slice(b")");
       }
     }
     Syntax::IdentifierExpr { name } => {
-      out.write_all(name.as_slice())?;
+      out.extend_from_slice(name.as_slice());
     }
     Syntax::ImportExpr { module } => {
-      out.write_all(b"import(")?;
-      emit_js(out, *module)?;
-      out.write_all(b")")?;
+      out.extend_from_slice(b"import(");
+      emit_js(out, *module);
+      out.extend_from_slice(b")");
     }
     Syntax::ImportMeta {} => {
-      out.write_all(b"import.meta")?;
+      out.extend_from_slice(b"import.meta");
     }
     Syntax::JsxAttribute { name, value } => {
-      emit_js(out, *name)?;
+      emit_js(out, *name);
       if let Some(value) = value {
-        out.write_all(b"=")?;
-        emit_js(out, *value)?;
+        out.extend_from_slice(b"=");
+        emit_js(out, *value);
       }
     }
     Syntax::JsxElement {
@@ -691,89 +686,89 @@ fn emit_js_under_operator<'a, T: Write>(
       attributes,
       children,
     } => {
-      out.write_all(b"<")?;
+      out.extend_from_slice(b"<");
       if let Some(name) = name {
-        emit_js(out, *name)?;
+        emit_js(out, *name);
       }
       for attr in attributes {
-        out.write_all(b" ")?;
-        emit_js(out, *attr)?;
+        out.extend_from_slice(b" ");
+        emit_js(out, *attr);
       }
       if children.is_empty() {
-        out.write_all(b"/>")?;
+        out.extend_from_slice(b"/>");
       } else {
-        out.write_all(b">")?;
+        out.extend_from_slice(b">");
         for child in children {
-          emit_js(out, *child)?;
+          emit_js(out, *child);
         }
-        out.write_all(b"</")?;
+        out.extend_from_slice(b"</");
         if let Some(name) = name {
-          emit_js(out, *name)?;
+          emit_js(out, *name);
         }
-        out.write_all(b">")?;
+        out.extend_from_slice(b">");
       }
     }
     Syntax::JsxExpressionContainer { value } => {
-      out.write_all(b"{")?;
-      emit_js(out, *value)?;
-      out.write_all(b"}")?;
+      out.extend_from_slice(b"{");
+      emit_js(out, *value);
+      out.extend_from_slice(b"}");
     }
     Syntax::JsxMember { base, path } => {
-      out.write_all(base.as_slice())?;
+      out.extend_from_slice(base.as_slice());
       for c in path {
-        out.write_all(b".")?;
-        out.write_all(c.as_slice())?;
+        out.extend_from_slice(b".");
+        out.extend_from_slice(c.as_slice());
       }
     }
     Syntax::JsxName { namespace, name } => {
       if let Some(namespace) = namespace {
-        out.write_all(namespace.as_slice())?;
-        out.write_all(b":")?;
+        out.extend_from_slice(namespace.as_slice());
+        out.extend_from_slice(b":");
       }
-      out.write_all(name.as_slice())?;
+      out.extend_from_slice(name.as_slice());
     }
     Syntax::JsxSpreadAttribute { value } => {
-      out.write_all(b"{...")?;
-      emit_js(out, *value)?;
-      out.write_all(b"}")?;
+      out.extend_from_slice(b"{...");
+      emit_js(out, *value);
+      out.extend_from_slice(b"}");
     }
     Syntax::JsxText { value } => {
-      out.write_all(value.as_slice())?;
+      out.extend_from_slice(value.as_slice());
     }
     Syntax::LiteralArrayExpr { elements } => {
-      out.write_all(b"[")?;
+      out.extend_from_slice(b"[");
       for (i, e) in elements.iter().enumerate() {
         if i > 0 {
-          out.write_all(b",")?;
+          out.extend_from_slice(b",");
         };
         match e {
           ArrayElement::Single(expr) => {
-            emit_js(out, *expr)?;
+            emit_js(out, *expr);
           }
           ArrayElement::Rest(expr) => {
-            out.write_all(b"...")?;
-            emit_js(out, *expr)?;
+            out.extend_from_slice(b"...");
+            emit_js(out, *expr);
           }
           ArrayElement::Empty => {}
         };
       }
-      out.write_all(b"]")?;
+      out.extend_from_slice(b"]");
     }
     Syntax::LiteralObjectExpr { members } => {
-      out.write_all(b"{")?;
+      out.extend_from_slice(b"{");
       for (i, e) in members.iter().enumerate() {
         if i > 0 {
-          out.write_all(b",")?;
+          out.extend_from_slice(b",");
         }
-        emit_js(out, *e)?;
+        emit_js(out, *e);
       }
-      out.write_all(b"}")?;
+      out.extend_from_slice(b"}");
     }
     Syntax::LiteralNull {} => {
-      out.write_all(b"null")?;
+      out.extend_from_slice(b"null");
     }
     Syntax::LiteralUndefined {} => {
-      out.write_all(b"undefined")?;
+      out.extend_from_slice(b"undefined");
     }
     Syntax::UnaryExpr {
       parenthesised,
@@ -787,12 +782,12 @@ fn emit_js_under_operator<'a, T: Write>(
         _ => false,
       };
       if must_parenthesise {
-        out.write_all(b"(")?;
+        out.extend_from_slice(b"(");
       };
-      out.write_all(UNARY_OPERATOR_SYNTAX.get(operator_name).unwrap().as_bytes())?;
-      emit_js_under_operator(out, *argument, Some(operator.precedence))?;
+      out.extend_from_slice(UNARY_OPERATOR_SYNTAX.get(operator_name).unwrap().as_bytes());
+      emit_js_under_operator(out, *argument, Some(operator.precedence));
       if must_parenthesise {
-        out.write_all(b")")?;
+        out.extend_from_slice(b")");
       };
     }
     Syntax::UnaryPostfixExpr {
@@ -807,39 +802,39 @@ fn emit_js_under_operator<'a, T: Write>(
         _ => false,
       };
       if must_parenthesise {
-        out.write_all(b"(")?;
+        out.extend_from_slice(b"(");
       };
-      emit_js_under_operator(out, *argument, Some(operator.precedence))?;
-      out.write_all(match operator_name {
+      emit_js_under_operator(out, *argument, Some(operator.precedence));
+      out.extend_from_slice(match operator_name {
         OperatorName::PostfixDecrement => b"--",
         OperatorName::PostfixIncrement => b"++",
         _ => unreachable!(),
-      })?;
+      });
       if must_parenthesise {
-        out.write_all(b")")?;
+        out.extend_from_slice(b")");
       };
     }
     Syntax::BlockStmt { body } => {
-      out.write_all(b"{")?;
-      emit_statements(out, &body)?;
-      out.write_all(b"}")?;
+      out.extend_from_slice(b"{");
+      emit_statements(out, &body);
+      out.extend_from_slice(b"}");
     }
     Syntax::BreakStmt { label } => {
-      out.write_all(b"break")?;
+      out.extend_from_slice(b"break");
       if let Some(label) = label {
-        out.write_all(b" ")?;
-        out.write_all(label.as_slice())?;
+        out.extend_from_slice(b" ");
+        out.extend_from_slice(label.as_slice());
       };
     }
     Syntax::ContinueStmt { label } => {
-      out.write_all(b"continue")?;
+      out.extend_from_slice(b"continue");
       if let Some(label) = label {
-        out.write_all(b" ")?;
-        out.write_all(label.as_slice())?;
+        out.extend_from_slice(b" ");
+        out.extend_from_slice(label.as_slice());
       };
     }
     Syntax::DebuggerStmt {} => {
-      out.write_all(b"debugger")?;
+      out.extend_from_slice(b"debugger");
     }
     Syntax::ComputedMemberExpr {
       optional_chaining,
@@ -850,13 +845,13 @@ fn emit_js_under_operator<'a, T: Write>(
         out,
         *object,
         Some(OPERATORS[&OperatorName::ComputedMemberAccess].precedence),
-      )?;
+      );
       if *optional_chaining {
-        out.write_all(b"?.")?;
+        out.extend_from_slice(b"?.");
       };
-      out.write_all(b"[")?;
-      emit_js(out, *member)?;
-      out.write_all(b"]")?;
+      out.extend_from_slice(b"[");
+      emit_js(out, *member);
+      out.extend_from_slice(b"]");
     }
     // We split all `export class/function` into a declaration and an export at the end, so drop the `export`.
     // The exception is for unnamed functions and classes.
@@ -867,49 +862,49 @@ fn emit_js_under_operator<'a, T: Write>(
       match &*declaration.stx() {
         Syntax::ClassDecl { name, .. } | Syntax::FunctionDecl { name, .. } if name.is_none() => {
           debug_assert!(default);
-          out.write_all(b"export default ")?;
+          out.extend_from_slice(b"export default ");
         }
         _ => {}
       };
-      emit_js(out, *declaration)?;
+      emit_js(out, *declaration);
     }
     Syntax::ExportDefaultExprStmt { expression } => {
-      out.write_all(b"export default ")?;
-      emit_js(out, *expression)?;
+      out.extend_from_slice(b"export default ");
+      emit_js(out, *expression);
     }
     Syntax::ExportListStmt { names, from } => {
-      out.write_all(b"export")?;
-      emit_import_or_export_statement_trailer(out, Some(names), from.as_ref())?;
+      out.extend_from_slice(b"export");
+      emit_import_or_export_statement_trailer(out, Some(names), from.as_ref());
     }
     Syntax::ExpressionStmt { expression } => {
-      emit_js(out, *expression)?;
+      emit_js(out, *expression);
     }
     Syntax::IfStmt {
       test,
       consequent,
       alternate,
     } => {
-      out.write_all(b"if(")?;
-      emit_js(out, *test)?;
-      out.write_all(b")")?;
-      emit_js(out, *consequent)?;
+      out.extend_from_slice(b"if(");
+      emit_js(out, *test);
+      out.extend_from_slice(b")");
+      emit_js(out, *consequent);
       if let Some(alternate) = alternate {
         if get_leaf_node_type(*consequent) == LeafNodeType::Block {
           // Do nothing.
         } else {
-          out.write_all(b";")?;
+          out.extend_from_slice(b";");
         };
-        out.write_all(b"else")?;
+        out.extend_from_slice(b"else");
         if let Syntax::BlockStmt { .. } = &*alternate.stx() {
           // Do nothing.
         } else {
-          out.write_all(b" ")?;
+          out.extend_from_slice(b" ");
         };
-        emit_js(out, *alternate)?;
+        emit_js(out, *alternate);
       };
     }
     Syntax::ForStmt { header, body } => {
-      out.write_all(b"for(")?;
+      out.extend_from_slice(b"for(");
       match header {
         ForStmtHeader::Three {
           init,
@@ -918,141 +913,141 @@ fn emit_js_under_operator<'a, T: Write>(
         } => {
           match init {
             ForThreeInit::None => {}
-            ForThreeInit::Expression(n) | ForThreeInit::Declaration(n) => emit_js(out, *n)?,
+            ForThreeInit::Expression(n) | ForThreeInit::Declaration(n) => emit_js(out, *n),
           };
-          out.write_all(b";")?;
+          out.extend_from_slice(b";");
           if let Some(n) = condition {
-            emit_js(out, *n)?
-          }
-          out.write_all(b";")?;
+            emit_js(out, *n);
+          };
+          out.extend_from_slice(b";");
           if let Some(n) = post {
-            emit_js(out, *n)?
-          }
+            emit_js(out, *n);
+          };
         }
         ForStmtHeader::InOf { of, lhs, rhs } => {
           match lhs {
             ForInOfStmtHeaderLhs::Declaration(n) | ForInOfStmtHeaderLhs::Pattern(n) => {
-              emit_js(out, *n)?
+              emit_js(out, *n);
             }
           };
           if *of {
-            out.write_all(b" of ")?;
+            out.extend_from_slice(b" of ");
           } else {
-            out.write_all(b" in ")?;
+            out.extend_from_slice(b" in ");
           }
-          emit_js(out, *rhs)?;
+          emit_js(out, *rhs);
         }
       };
-      out.write_all(b")")?;
-      emit_js(out, *body)?;
+      out.extend_from_slice(b")");
+      emit_js(out, *body);
     }
     Syntax::ImportStmt {
       default,
       names,
       module,
     } => {
-      out.write_all(b"import")?;
+      out.extend_from_slice(b"import");
       if let Some(default) = default {
-        out.write_all(b" ")?;
-        emit_js(out, *default)?;
+        out.extend_from_slice(b" ");
+        emit_js(out, *default);
         if names.is_some() {
-          out.write_all(b",")?;
+          out.extend_from_slice(b",");
         } else {
-          out.write_all(b" ")?;
+          out.extend_from_slice(b" ");
         };
       };
-      emit_import_or_export_statement_trailer(out, names.as_ref(), Some(module))?;
+      emit_import_or_export_statement_trailer(out, names.as_ref(), Some(module));
     }
     Syntax::ReturnStmt { value } => {
-      out.write_all(b"return")?;
+      out.extend_from_slice(b"return");
       if let Some(value) = value {
         // TODO Omit space if possible.
-        out.write_all(b" ")?;
-        emit_js(out, *value)?;
+        out.extend_from_slice(b" ");
+        emit_js(out, *value);
       };
     }
     Syntax::ThisExpr {} => {
-      out.write_all(b"this")?;
+      out.extend_from_slice(b"this");
     }
     Syntax::ThrowStmt { value } => {
-      out.write_all(b"throw ")?;
-      emit_js(out, *value)?;
+      out.extend_from_slice(b"throw ");
+      emit_js(out, *value);
     }
     Syntax::TopLevel { body } => {
-      emit_statements(out, &body)?;
+      emit_statements(out, &body);
     }
     Syntax::TryStmt {
       wrapped,
       catch,
       finally,
     } => {
-      out.write_all(b"try")?;
-      emit_js(out, *wrapped)?;
+      out.extend_from_slice(b"try");
+      emit_js(out, *wrapped);
       if let Some(c) = catch {
-        emit_js(out, *c)?;
+        emit_js(out, *c);
       }
       if let Some(f) = finally {
-        out.write_all(b"finally")?;
-        emit_js(out, *f)?;
+        out.extend_from_slice(b"finally");
+        emit_js(out, *f);
       };
     }
     Syntax::WhileStmt { condition, body } => {
-      out.write_all(b"while(")?;
-      emit_js(out, *condition)?;
-      out.write_all(b")")?;
-      emit_js(out, *body)?;
+      out.extend_from_slice(b"while(");
+      emit_js(out, *condition);
+      out.extend_from_slice(b")");
+      emit_js(out, *body);
     }
     Syntax::DoWhileStmt { condition, body } => {
-      out.write_all(b"do")?;
+      out.extend_from_slice(b"do");
       if let Syntax::BlockStmt { .. } = &*body.stx() {
         // Do nothing.
       } else {
-        out.write_all(b" ")?;
+        out.extend_from_slice(b" ");
       };
-      emit_js(out, *body)?;
+      emit_js(out, *body);
       if get_leaf_node_type(*body) == LeafNodeType::Block {
         // Do nothing.
       } else {
-        out.write_all(b";")?;
+        out.extend_from_slice(b";");
       };
-      out.write_all(b"while(")?;
-      emit_js(out, *condition)?;
-      out.write_all(b")")?;
+      out.extend_from_slice(b"while(");
+      emit_js(out, *condition);
+      out.extend_from_slice(b")");
     }
     Syntax::SwitchStmt { test, branches } => {
-      out.write_all(b"switch(")?;
-      emit_js(out, *test)?;
-      out.write_all(b"){")?;
+      out.extend_from_slice(b"switch(");
+      emit_js(out, *test);
+      out.extend_from_slice(b"){");
       for (i, b) in branches.iter().enumerate() {
         if i > 0 {
-          out.write_all(b";")?;
+          out.extend_from_slice(b";");
         };
-        emit_js(out, *b)?;
+        emit_js(out, *b);
       }
-      out.write_all(b"}")?;
+      out.extend_from_slice(b"}");
     }
     Syntax::CatchBlock { parameter, body } => {
-      out.write_all(b"catch")?;
+      out.extend_from_slice(b"catch");
       if let Some(p) = parameter {
-        out.write_all(b"(")?;
-        emit_js(out, *p)?;
-        out.write_all(b")")?;
+        out.extend_from_slice(b"(");
+        emit_js(out, *p);
+        out.extend_from_slice(b")");
       }
-      emit_js(out, *body)?;
+      emit_js(out, *body);
     }
     Syntax::SwitchBranch { case, body } => {
       match case {
         Some(case) => {
           // TODO Omit space if possible.
-          out.write_all(b"case ")?;
-          emit_js(out, *case)?;
-          out.write_all(b":")?;
+          out.extend_from_slice(b"case ");
+          emit_js(out, *case);
+          out.extend_from_slice(b":");
         }
         None => {
-          out.write_all(b"default:")?;
+          out.extend_from_slice(b"default:");
         }
       }
-      emit_statements(out, &body)?;
+      emit_statements(out, &body);
     }
     Syntax::ObjectPatternProperty {
       key,
@@ -1061,34 +1056,34 @@ fn emit_js_under_operator<'a, T: Write>(
     } => {
       match key {
         ClassOrObjectMemberKey::Direct(name) => {
-          out.write_all(name.as_slice())?;
+          out.extend_from_slice(name.as_slice());
         }
         ClassOrObjectMemberKey::Computed(expr) => {
-          out.write_all(b"[")?;
-          emit_js(out, *expr)?;
-          out.write_all(b"]")?;
+          out.extend_from_slice(b"[");
+          emit_js(out, *expr);
+          out.extend_from_slice(b"]");
         }
       };
       if let Some(t) = target {
-        out.write_all(b":")?;
-        emit_js(out, *t)?;
+        out.extend_from_slice(b":");
+        emit_js(out, *t);
       };
       if let Some(v) = default_value {
-        out.write_all(b"=")?;
-        emit_js(out, *v)?;
+        out.extend_from_slice(b"=");
+        emit_js(out, *v);
       };
     }
     Syntax::ObjectMember { typ } => {
       match typ {
         ObjectMemberType::Valued { key, value } => {
-          emit_class_or_object_member(out, key, value, b":")?;
+          emit_class_or_object_member(out, key, value, b":");
         }
         ObjectMemberType::Shorthand { name } => {
-          out.write_all(name.as_slice())?;
+          out.extend_from_slice(name.as_slice());
         }
         ObjectMemberType::Rest { value } => {
-          out.write_all(b"...")?;
-          emit_js(out, *value)?;
+          out.extend_from_slice(b"...");
+          emit_js(out, *value);
         }
       };
     }
@@ -1110,18 +1105,18 @@ fn emit_js_under_operator<'a, T: Write>(
         _ => false,
       };
       if must_parenthesise {
-        out.write_all(b"(")?;
+        out.extend_from_slice(b"(");
       };
-      emit_js_under_operator(out, *left, Some(operator.precedence))?;
-      out.write_all(
+      emit_js_under_operator(out, *left, Some(operator.precedence));
+      out.extend_from_slice(
         BINARY_OPERATOR_SYNTAX
           .get(operator_name)
           .unwrap()
           .as_bytes(),
-      )?;
-      out.write_all(right.as_slice())?;
+      );
+      out.extend_from_slice(right.as_slice());
       if must_parenthesise {
-        out.write_all(b")")?;
+        out.extend_from_slice(b")");
       };
     }
     Syntax::ClassExpr {
@@ -1133,28 +1128,27 @@ fn emit_js_under_operator<'a, T: Write>(
       // We need to keep parentheses to prevent class expressions from being misinterpreted as a class declaration, which cannot be part of an expression.
       // TODO Omit parentheses if possible.
       if *parenthesised {
-        out.write_all(b"(")?;
+        out.extend_from_slice(b"(");
       }
-      emit_class(out, *name, *extends, members)?;
+      emit_class(out, *name, *extends, members);
       // TODO Omit parentheses if possible.
       if *parenthesised {
-        out.write_all(b")")?;
+        out.extend_from_slice(b")");
       }
     }
     Syntax::LabelStmt { name, statement } => {
-      out.write_all(name.as_slice())?;
-      out.write_all(b":")?;
-      emit_js(out, *statement)?;
+      out.extend_from_slice(name.as_slice());
+      out.extend_from_slice(b":");
+      emit_js(out, *statement);
     }
     Syntax::CallArg { spread, value } => {
       if *spread {
-        out.write_all(b"...")?;
+        out.extend_from_slice(b"...");
       }
-      emit_js(out, *value)?;
+      emit_js(out, *value);
     }
     Syntax::SuperExpr {} => {
-      out.write_all(b"super")?;
+      out.extend_from_slice(b"super");
     }
   };
-  Ok(())
 }
