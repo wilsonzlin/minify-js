@@ -1,29 +1,31 @@
-use minify_js::{minify, TopLevelMode};
-use std::{
-    env,
-    fs::File,
-    io::{BufWriter, Read},
-    time::Instant,
-};
+use minify_js::minify;
+use minify_js::Session;
+use minify_js::TopLevelMode;
+use std::env;
+use std::fs::File;
+use std::io::BufWriter;
+use std::io::Read;
+use std::time::Instant;
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    let mut code = Vec::new();
-    File::open(&args[1])
-        .expect("open file")
-        .read_to_end(&mut code)
-        .expect("read file");
+  let args: Vec<String> = env::args().collect();
+  let mut code = Vec::new();
+  File::open(&args[1])
+    .expect("open file")
+    .read_to_end(&mut code)
+    .expect("read file");
 
-    let iterations = u64::from_str_radix(&args[2], 10).expect("parse iterations argument");
-    let mut output_len = 0;
-    let mut output = BufWriter::new(Vec::new());
-    let started = Instant::now();
-    for _ in 0..iterations {
-        output.get_mut().clear();
-        minify(TopLevelMode::Global, code.to_vec(), &mut output).expect("minify");
-        output_len = output.get_ref().len();
-    }
-    let elapsed_ns = started.elapsed().as_nanos();
+  let iterations = u64::from_str_radix(&args[2], 10).expect("parse iterations argument");
+  let mut output_len = 0;
+  let mut output = BufWriter::new(Vec::new());
+  let started = Instant::now();
+  let session = Session::new();
+  for _ in 0..iterations {
+    output.get_mut().clear();
+    minify(&session, TopLevelMode::Global, &code, &mut output).expect("minify");
+    output_len = output.get_ref().len();
+  }
+  let elapsed_ns = started.elapsed().as_nanos();
 
-    println!("{} {}", output_len, elapsed_ns);
+  println!("{} {}", output_len, elapsed_ns);
 }

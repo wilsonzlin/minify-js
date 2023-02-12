@@ -7,11 +7,16 @@ members = [
 ]
 
 [profile.release]
-lto = true
-strip = true
 codegen-units = 1
+lto = true
 opt-level = 3
+strip = true
 
 [profile.release.package."*"]
 codegen-units = 1
 opt-level = 3
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true
+strip = "none"
