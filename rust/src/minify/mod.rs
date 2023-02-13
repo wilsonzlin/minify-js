@@ -3,7 +3,6 @@ use parse_js::ast::ClassOrObjectMemberKey;
 use parse_js::ast::ClassOrObjectMemberValue;
 use parse_js::ast::ExportName;
 use parse_js::ast::ExportNames;
-use parse_js::ast::Node;
 use parse_js::ast::NodeData;
 use parse_js::ast::ObjectMemberType;
 use parse_js::ast::Syntax;
@@ -14,101 +13,237 @@ use parse_js::char::ID_START_CHARSTR;
 use parse_js::lex::KEYWORD_STRS;
 use parse_js::session::Session;
 use parse_js::session::SessionHashMap;
+use parse_js::session::SessionHashSet;
+use parse_js::session::SessionVec;
 use parse_js::source::SourceRange;
 use parse_js::symbol::Identifier;
+use parse_js::symbol::Scope;
 use parse_js::symbol::ScopeFlag;
 use parse_js::symbol::Symbol;
 use parse_js::visit::JourneyControls;
 use parse_js::visit::Visitor;
-
-const JSX_COMPONENT_NAME_PREFIX: char = '\u{01BC}';
-const ALT_MINIFIED_NAMES: &'static [char] = &[
-  '\u{01BB}', '\u{02B0}', '\u{02B1}', '\u{02B2}', '\u{02B3}', '\u{02B4}', '\u{02B5}', '\u{02B6}',
-  '\u{02B7}', '\u{02B8}', '\u{02B9}', '\u{02BA}', '\u{02BB}', '\u{02BC}', '\u{02BD}', '\u{02BE}',
-  '\u{02BF}', '\u{02C0}', '\u{02C1}', '\u{02C6}', '\u{02C7}', '\u{02C8}', '\u{02C9}', '\u{02CA}',
-  '\u{02CB}', '\u{02CC}', '\u{02CD}', '\u{02CE}', '\u{02CF}', '\u{02D0}', '\u{02D1}', '\u{02E0}',
-  '\u{02E1}', '\u{02E2}', '\u{02E3}', '\u{02E4}', '\u{02EC}', '\u{02EE}', '\u{0374}', '\u{037A}',
-  '\u{0559}', '\u{0640}', '\u{06E5}', '\u{06E6}', '\u{07F4}', '\u{07F5}', '\u{07FA}',
-];
 
 struct ExportBinding<'a> {
   target: SourceRange<'a>,
   alias: SourceRange<'a>,
 }
 
+// Generator of minified names. Works by generating the next smallest possible name (starting from `a`), and then repeats until it finds one that is not a keyword or would conflict with an inherited variable (a variable that is in scope **and** used by code that we would otherwise shadow).
+struct MinifiedNameGenerator<'a> {
+  session: &'a Session,
+  // Index of each character of the last generated name, in reverse order (i.e. first character is last element) for optimised extension.
+  state: SessionVec<'a, usize>,
+}
+
+impl<'a> MinifiedNameGenerator<'a> {
+  pub fn new(session: &'a Session) -> MinifiedNameGenerator<'a> {
+    MinifiedNameGenerator {
+      session,
+      state: session.new_vec(),
+    }
+  }
+
+  fn transition_to_next_possible_minified_name(&mut self) -> SessionVec<'a, u8> {
+    let n = &mut self.state;
+    let mut overflow = true;
+    for i in 0..n.len() {
+      let charset = if i == n.len() - 1 {
+        ID_START_CHARSTR
+      } else {
+        ID_CONTINUE_CHARSTR
+      };
+      if n[i] == charset.len() - 1 {
+        n[i] = 0;
+      } else {
+        n[i] += 1;
+        overflow = false;
+        break;
+      };
+    }
+    if overflow {
+      n.push(0);
+    };
+
+    let mut name = self.session.new_vec(); // TODO Capacity
+    for (i, idx) in n.iter().enumerate() {
+      let charset = if i == n.len() - 1 {
+        ID_START_CHARSTR
+      } else {
+        ID_CONTINUE_CHARSTR
+      };
+      name.push(charset[*idx]);
+    }
+    name.reverse();
+    name
+  }
+
+  // TODO This needs optimisation, in case inherited_vars has a long sequence of used minified names (likely).
+  pub fn generate_next_available_minified_name(
+    &mut self,
+    inherited_vars: &SessionHashSet<Identifier<'a>>,
+  ) -> Identifier<'a> {
+    loop {
+      let name = self.transition_to_next_possible_minified_name();
+      if KEYWORD_STRS.contains_key(name.as_slice()) {
+        continue;
+      };
+      let name = self
+        .session
+        .get_allocator()
+        .alloc_slice_copy(name.as_slice());
+      let as_ident = SourceRange::new(name, 0, name.len());
+      if inherited_vars.contains(&as_ident) {
+        continue;
+      };
+      return as_ident;
+    }
+  }
+}
+
+// Our additional state that's associated with exactly one Symbol.
 #[derive(Default)]
-struct MinifySymbol {
-  // Set to 0 initially, before minification pass. WARNING: 0 is still a valid value, so do not use before setting.
-  minified_name_id: usize,
+struct MinifySymbol<'a> {
+  minified_name: Option<SourceRange<'a>>,
   is_used_as_jsx_component: bool,
 }
 
-impl MinifySymbol {
-  fn set_minified_name_id(&mut self, id: usize) {
-    self.minified_name_id = id;
-  }
+// Our additional state that's associated with exactly one Scope.
+struct MinifyScope<'a> {
+  // Variables that are declared by an ancestor (not own) scope (or is not declared anywhere and assumed to be global), and used by code in own or any descendant scope.
+  inherited_vars: SessionHashSet<'a, Identifier<'a>>,
+}
 
-  fn mark_as_used_as_jsx_component(&mut self) {
-    self.is_used_as_jsx_component = true;
-  }
-
-  fn generate_minified_name_with_edit<'a>(
-    &self,
-    session: &'a Session,
-    original: Identifier<'a>,
-  ) -> SourceRange<'a> {
-    let mut id = self.minified_name_id;
-    let mut name = session.new_vec();
-    // See main function at bottom for why we do this.
-    if self.is_used_as_jsx_component {
-      name.extend(b"  ");
-      JSX_COMPONENT_NAME_PREFIX.encode_utf8(&mut name[0..2]);
+impl<'a> MinifyScope<'a> {
+  pub fn new(session: &'a Session) -> MinifyScope<'a> {
+    MinifyScope {
+      inherited_vars: session.new_hashset(),
     }
-    name.push(ID_START_CHARSTR[id % ID_START_CHARSTR.len()]);
-    if id >= ID_START_CHARSTR.len() {
-      id /= ID_START_CHARSTR.len();
-      while id >= ID_CONTINUE_CHARSTR.len() {
-        name.push(ID_CONTINUE_CHARSTR[id % ID_CONTINUE_CHARSTR.len()]);
-        id /= ID_CONTINUE_CHARSTR.len();
-      }
-      name.push(ID_CONTINUE_CHARSTR[id % ID_CONTINUE_CHARSTR.len()]);
-    };
-    if let Some(alt_id) = KEYWORD_STRS.get(name.as_slice()) {
-      // This name is a keyword, so we replace it with a Unicode character instead.
-      // This Unicode character is 2 bytes when encoded in UTF-8, so it's more than minimal enough. UTF-8 encodes U+0080 to U+07FF in 2 bytes.
-      // There should be exactly one ALT_MINIFIED_NAMES element for each KEYWORD_STRS entry.
-      // Using a Unicode name will ensure no chance of clashing with keywords, well-knowns, and almost all variables.
-      // Clashes can appear quickly e.g. `in`, `of`, `if`.
-      // TODO This could still clash with an untracked or unminified variable; however, that's technically true of any minified name.
-      let s = ALT_MINIFIED_NAMES[*alt_id].encode_utf8(&mut name).len();
-      name.truncate(s);
-    };
-    let name = session.get_allocator().alloc_slice_copy(&name);
-    original.with_edit(name)
   }
 }
 
-// See main function at bottom for why we need this.
-struct JsxVisitor<'a, 'b> {
-  symbols: &'b mut SessionHashMap<'a, Symbol<'a>, MinifySymbol>,
+// This should be run after the first `IdentifierPass` visitor has run and before the `MinifyPass` visitor runs.
+// The first pass collects all usages of variables to determine inherited variables for each scope, so we can know what minified names can be safely used (see `MinifiedNameGenerator`). This function will then go through each declaration in each scope and generate and update their corresponding `MinifySymbol.minified_name`.
+// Some pecularities to note: globals aren't minified (whether declared or not), so when blacklisting minified names, they are directly disallowed. However, all other variables will be minified, so we need to blacklist their minified name, not their original name. This is why this function processes scopes top-down (from the root), as we need to know the minified names of ancestor variables first before we can blacklist them.
+fn minify_names<'a>(
+  session: &'a Session,
+  scope: Scope<'a>,
+  minify_scopes: &mut SessionHashMap<'a, Scope<'a>, MinifyScope<'a>>,
+  minify_symbols: &mut SessionHashMap<'a, Symbol<'a>, MinifySymbol<'a>>,
+) {
+  // It's possible that the entry doesn't exist, if there were no inherited variables during the first pass.
+  let minify_scope = minify_scopes
+    .entry(scope)
+    .or_insert_with(|| MinifyScope::new(session));
+  // Our `inherited_vars` contains original names; we need to retrieve their minified names.
+  let mut minified_inherited_vars = session.new_hashset();
+  for &original_inherited_var in minify_scope.inherited_vars.iter() {
+    match scope.find_symbol(original_inherited_var) {
+      None => {
+        // Global (undeclared or declared).
+        minified_inherited_vars.insert(original_inherited_var);
+      }
+      Some(sym) => {
+        let min_sym = minify_symbols.get(&sym).unwrap();
+        let min_name = min_sym.minified_name.unwrap();
+        minified_inherited_vars.insert(min_name);
+      }
+    };
+  }
+  // Yes, we start from the very beginning in case there are possible gaps/opportunities due to inherited variables on ancestors.
+  let mut next_min_name = MinifiedNameGenerator::new(session);
+  for &sym_name in scope.symbol_names().iter() {
+    let sym = scope.get_symbol(sym_name).unwrap();
+    let min_sym = minify_symbols.entry(sym).or_default();
+    assert!(min_sym.minified_name.is_none());
+    if min_sym.is_used_as_jsx_component {
+      // We'll process these in another iteration, as there's fewer characters allowed for the identifier start, and we don't want to skip past valid identifiers for non-JSX-component names.
+      continue;
+    };
+    min_sym.minified_name =
+      Some(next_min_name.generate_next_available_minified_name(&minified_inherited_vars))
+  }
+  for &sym_name in scope.symbol_names().iter() {
+    let sym = scope.get_symbol(sym_name).unwrap();
+    let min_sym = minify_symbols.get_mut(&sym).unwrap();
+    if !min_sym.is_used_as_jsx_component {
+      continue;
+    };
+    // TODO This is very slow and dumb.
+    let mut min_name;
+    loop {
+      min_name = next_min_name.generate_next_available_minified_name(&minified_inherited_vars);
+      if !min_name.as_slice()[0].is_ascii_lowercase() {
+        break;
+      };
+    }
+    min_sym.minified_name = Some(min_name)
+  }
+  for &c in scope.children().iter() {
+    minify_names(session, c, minify_scopes, minify_symbols);
+  }
 }
 
-impl<'a, 'b> Visitor<'a> for JsxVisitor<'a, 'b> {
+// The first pass of the minifier. It does two things:
+// - Detect all usages of JSX components, as React determines `<link>` to be the HTML tag and `<Link>` to be the variable `Link` as a component, so we cannot minify `Link` to `link` or `a0` or `bb` (i.e. make capitalised JSX elements uncapitalised).
+// - Find all references of variables so we can determine inherited variables (see `MinifiedNameGenerator` and `MinifyScope`). This is because JS allows variables to be lexically references before they're used, so we cannot do this in the same pass. For example, `let b = 1; { let a = () => b; let b = 2; }`.
+struct IdentifierPass<'a, 'b> {
+  session: &'a Session,
+  symbols: &'b mut SessionHashMap<'a, Symbol<'a>, MinifySymbol<'a>>,
+  scopes: &'b mut SessionHashMap<'a, Scope<'a>, MinifyScope<'a>>,
+}
+
+impl<'a, 'b> IdentifierPass<'a, 'b> {
+  // See [notes/Name minification.md] for the algorithm in more detail.
+  fn process_variable_usage(&mut self, scope: Scope<'a>, name: Identifier<'a>) {
+    let mut cur = Some(scope);
+    while let Some(scope) = cur {
+      if scope.get_symbol(name).is_some() {
+        break;
+      };
+      self
+        .scopes
+        .entry(scope)
+        .or_insert_with(|| MinifyScope::new(self.session))
+        .inherited_vars
+        .insert(name);
+      cur = scope.parent();
+    }
+  }
+}
+
+impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
   fn on_syntax(&mut self, n: &mut NodeData<'a>, _ctl: &mut JourneyControls) -> () {
+    let scope = n.scope;
     match &n.stx {
+      Syntax::JsxMember { base: name, .. } => {
+        self.process_variable_usage(scope, *name);
+      }
       Syntax::JsxName {
-        namespace: None,
         name,
+        namespace: None,
       } if !name.as_slice()[0].is_ascii_lowercase() => {
-        match n.scope.find_symbol(*name) {
-          Some(sym) => self
+        if let Some(sym) = n.scope.find_symbol(*name) {
+          self
             .symbols
             .entry(sym)
             .or_default()
-            .mark_as_used_as_jsx_component(),
-          None => {
-            // TODO Warn if symbol not found.
+            .is_used_as_jsx_component = true;
+        };
+        self.process_variable_usage(scope, *name);
+      }
+      // IdentifierPattern also appears in destructuring, not just declarations. It's safe either way; if it's a declaration, its scope will have its declaration, so there will be no inheritance.
+      Syntax::IdentifierPattern { name } => {
+        self.process_variable_usage(scope, *name);
+      }
+      Syntax::IdentifierExpr { name } => {
+        self.process_variable_usage(scope, *name);
+      }
+      Syntax::ObjectMember { typ } => {
+        match typ {
+          ObjectMemberType::Shorthand { name } => {
+            self.process_variable_usage(scope, *name);
           }
+          _ => {}
         };
       }
       _ => {}
@@ -116,14 +251,15 @@ impl<'a, 'b> Visitor<'a> for JsxVisitor<'a, 'b> {
   }
 }
 
-struct MinifyVisitor<'a, 'b> {
+// The second and main pass, that does most of the work. This should be run after the `minify_names` function.
+struct MinifyPass<'a, 'b> {
   session: &'a Session,
   // Exports with the same exported name (including multiple default exports) are illegal, so we don't have to worry about/handle that case.
   export_bindings: &'b mut Vec<ExportBinding<'a>>,
-  symbols: &'b mut SessionHashMap<'a, Symbol<'a>, MinifySymbol>,
+  symbols: &'b mut SessionHashMap<'a, Symbol<'a>, MinifySymbol<'a>>,
 }
 
-impl<'a, 'b> MinifyVisitor<'a, 'b> {
+impl<'a, 'b> MinifyPass<'a, 'b> {
   fn visit_exported_pattern(&mut self, n: &mut NodeData<'a>) -> () {
     match &mut n.stx {
       Syntax::ArrayPattern { elements, rest } => {
@@ -150,23 +286,23 @@ impl<'a, 'b> MinifyVisitor<'a, 'b> {
           // Shorthand.
           None => match key {
             ClassOrObjectMemberKey::Direct(key) => self.export_bindings.push(ExportBinding {
-              target: key.clone(),
-              alias: key.clone(),
+              target: *key,
+              alias: *key,
             }),
             _ => unreachable!(),
           },
         }
       }
       Syntax::IdentifierPattern { name } => self.export_bindings.push(ExportBinding {
-        target: name.clone(),
-        alias: name.clone(),
+        target: *name,
+        alias: *name,
       }),
       _ => unreachable!(),
     }
   }
 }
 
-impl<'a, 'b> Visitor<'a> for MinifyVisitor<'a, 'b> {
+impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
   fn on_syntax(&mut self, node: &mut NodeData<'a>, ctl: &mut JourneyControls) -> () {
     // We must not use `node.` after this point, as we're now borrowing it as mut.
     let loc = node.loc;
@@ -283,24 +419,22 @@ impl<'a, 'b> Visitor<'a> for MinifyVisitor<'a, 'b> {
       }
       Syntax::IdentifierPattern { name } => {
         let sym = scope.find_symbol(*name);
-        // TODO JsxMember and JsxNamespacedName must be capitalised to be interpreted as a component.
         if let Some(sym) = sym {
-          let minified = self.symbols[&sym].generate_minified_name_with_edit(self.session, *name);
+          let minified = self.symbols[&sym].minified_name.unwrap();
           new_stx = Some(Syntax::IdentifierPattern { name: minified });
         };
       }
       Syntax::IdentifierExpr { name } => {
         let sym = scope.find_symbol(*name);
-        // TODO JsxMember and JsxNamespacedName must be capitalised to be interpreted as a component.
         if let Some(sym) = sym {
-          let minified = self.symbols[&sym].generate_minified_name_with_edit(self.session, *name);
+          let minified = self.symbols[&sym].minified_name.unwrap();
           new_stx = Some(Syntax::IdentifierExpr { name: minified });
         };
       }
       Syntax::ClassOrFunctionName { name } => {
         let sym = scope.find_symbol(*name);
         if let Some(sym) = sym {
-          let minified = self.symbols[&sym].generate_minified_name_with_edit(self.session, *name);
+          let minified = self.symbols[&sym].minified_name.unwrap();
           new_stx = Some(Syntax::ClassOrFunctionName { name: minified });
         };
       }
@@ -308,9 +442,8 @@ impl<'a, 'b> Visitor<'a> for MinifyVisitor<'a, 'b> {
         base: name, path, ..
       } => {
         let sym = scope.find_symbol(*name);
-        // TODO JsxMember and JsxNamespacedName must be capitalised to be interpreted as a component.
         if let Some(sym) = sym {
-          let minified = self.symbols[&sym].generate_minified_name_with_edit(self.session, *name);
+          let minified = self.symbols[&sym].minified_name.unwrap();
           new_stx = Some(Syntax::JsxMember {
             base: minified,
             path: path.clone(),
@@ -322,9 +455,9 @@ impl<'a, 'b> Visitor<'a> for MinifyVisitor<'a, 'b> {
         namespace: None,
       } => {
         let sym = scope.find_symbol(*name);
-        // TODO JsxMember and JsxNamespacedName must be capitalised to be interpreted as a component.
+        // TODO JsxName must be capitalised to be interpreted as a component.
         if let Some(sym) = sym {
-          let minified = self.symbols[&sym].generate_minified_name_with_edit(self.session, *name);
+          let minified = self.symbols[&sym].minified_name.unwrap();
           new_stx = Some(Syntax::JsxName {
             namespace: None,
             name: minified,
@@ -340,11 +473,11 @@ impl<'a, 'b> Visitor<'a> for MinifyVisitor<'a, 'b> {
             Some(name) => match &name.stx {
               Syntax::ClassOrFunctionName { name } => {
                 self.export_bindings.push(ExportBinding {
-                  target: name.clone(),
+                  target: *name,
                   alias: if *default {
-                    name.with_edit(b"default")
+                    SourceRange::from_slice(b"default")
                   } else {
-                    name.clone()
+                    *name
                   },
                 });
               }
@@ -395,8 +528,7 @@ impl<'a, 'b> Visitor<'a> for MinifyVisitor<'a, 'b> {
             if target.is_none() {
               let sym = scope.find_symbol(*name);
               if let Some(sym) = sym {
-                let minified =
-                  self.symbols[&sym].generate_minified_name_with_edit(self.session, *name);
+                let minified = self.symbols[&sym].minified_name.unwrap();
                 let replacement_target_node =
                   new_node(self.session, scope, minified, Syntax::IdentifierPattern {
                     name: minified,
@@ -417,8 +549,7 @@ impl<'a, 'b> Visitor<'a> for MinifyVisitor<'a, 'b> {
           ObjectMemberType::Shorthand { name } => {
             let sym = scope.find_symbol(*name);
             if let Some(sym) = sym {
-              let minified =
-                self.symbols[&sym].generate_minified_name_with_edit(self.session, *name);
+              let minified = self.symbols[&sym].minified_name.unwrap();
               let replacement_initializer_node =
                 new_node(self.session, scope, minified, Syntax::IdentifierExpr {
                   name: minified,
@@ -448,55 +579,35 @@ impl<'a, 'b> Visitor<'a> for MinifyVisitor<'a, 'b> {
 pub fn minify_js<'a>(session: &'a Session, top_level_node: &mut NodeData<'a>) -> () {
   let top_level_scope = top_level_node.scope;
 
-  let mut symbols = session.new_hashmap::<Symbol, MinifySymbol>();
-  let mut scopes = session.new_vec();
-  scopes.push(top_level_scope);
-  let mut next_scope_to_inspect = 0;
-  while next_scope_to_inspect < scopes.len() {
-    let scope = scopes[next_scope_to_inspect];
-    scopes.extend_from_slice(&scope.children());
-    next_scope_to_inspect += 1;
-  }
-  // We need these since we cannot look up in scope_map while mutably borrowed by iter_mut().
-  let symbol_counts: Vec<usize> = scopes.iter().map(|s| s.symbol_count()).collect();
-  let mut minified_name_starts: Vec<usize> = vec![0; scopes.len()];
-  // Iterating like this assumes that any parent of an element is always present before it in the list.
-  for (id, &scope) in scopes.iter().enumerate() {
-    // TODO Opportunity for optimisation: not all variables are used by descendant scopes, so some of their names can be reused by descendants.
-    let minified_name_start = match scope.parent() {
-      Some(p) => symbol_counts[id] + minified_name_starts[id],
-      None => 0,
-    };
-    for (symbol_idx, &symbol_name) in scope.symbol_names().iter().enumerate() {
-      let symbol = scope.get_symbol(symbol_name).unwrap();
-      symbols
-        .entry(symbol)
-        .or_default()
-        .set_minified_name_id(minified_name_start + symbol_idx);
-    }
-    minified_name_starts[id] = minified_name_start;
-  }
+  // Our custom data/state associated with a Symbol.
+  let mut symbols = session.new_hashmap::<Symbol<'a>, MinifySymbol>();
+  // Our custom data/state associated with a Scope.
+  let mut scopes = session.new_hashmap::<Scope<'a>, MinifyScope<'a>>();
 
-  // Since React requires that non-namespaced JSX elements that refer to a JS component must never start with a lowercase letter (otherwise it will always be interpreted as an HTML tag, even if a same-named variable is in scope), we must detect all usages and prefix them with a unique non-lowercase character JSX_COMPONENT_NAME_PREFIX (this is the simplest solution given how we currently minify identifiers). Since we can't know which variables are used as such (for the same reason we cannot minify while parsing in the same step i.e. due to forward references across scopes), we must run a separate pass after parsing and before minifying.
-  let mut jsx_visitor = JsxVisitor {
+  let mut identifier_pass = IdentifierPass {
+    session,
     symbols: &mut symbols,
+    scopes: &mut scopes,
   };
-  jsx_visitor.visit_top_level(top_level_node);
+  identifier_pass.visit_top_level(top_level_node);
+
+  minify_names(session, top_level_scope, &mut scopes, &mut symbols);
 
   let mut export_bindings = Vec::new();
-  let mut visitor = MinifyVisitor {
+  let mut minify_pass = MinifyPass {
     session,
     export_bindings: &mut export_bindings,
     symbols: &mut symbols,
   };
-  visitor.visit_top_level(top_level_node);
+  minify_pass.visit_top_level(top_level_node);
+
   let mut export_names = session.new_vec();
   for e in export_bindings.iter() {
     let target_symbol = top_level_scope
       .find_symbol(e.target)
       .expect(format!("failed to find top-level export `{:?}`", e.target).as_str());
     export_names.push(ExportName {
-      target: symbols[&target_symbol].generate_minified_name_with_edit(session, e.target),
+      target: symbols[&target_symbol].minified_name.unwrap(),
       alias: new_node(
         session,
         top_level_scope,
@@ -510,7 +621,7 @@ pub fn minify_js<'a>(session: &'a Session, top_level_node: &mut NodeData<'a>) ->
     let final_export_stmt = new_node(
       session,
       top_level_scope,
-      top_level_node.loc.get_end_of_source(),
+      top_level_node.loc.at_end(),
       Syntax::ExportListStmt {
         names: ExportNames::Specific(export_names),
         from: None,

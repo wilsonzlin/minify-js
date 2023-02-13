@@ -8,7 +8,6 @@ use parse_js::ast::ForInOfStmtHeaderLhs;
 use parse_js::ast::ForStmtHeader;
 use parse_js::ast::ForThreeInit;
 use parse_js::ast::LiteralTemplatePart;
-use parse_js::ast::Node;
 use parse_js::ast::NodeData;
 use parse_js::ast::ObjectMemberType;
 use parse_js::ast::Syntax;
