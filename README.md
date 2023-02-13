@@ -18,9 +18,12 @@ Comparison with esbuild, run on [common libraries](./bench).
 ## Features
 
 - Fast parsing powered by SIMD instructions and lookup tables.
+- Data is backed by a fast reusable bump allocation arena.
 - Supports JSX.
+- Analyses scopes and variable visibilities.
 - Minification of identifiers.
 - Omits semicolons, spaces, parentheses, and braces where possible.
+- Transforms functions to arrow functions when `this` or `arguments` aren't used.
 
 ## Usage
 
