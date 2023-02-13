@@ -3,6 +3,7 @@ use parse_js::ast::ClassOrObjectMemberKey;
 use parse_js::ast::ClassOrObjectMemberValue;
 use parse_js::ast::ExportName;
 use parse_js::ast::ExportNames;
+use parse_js::ast::Node;
 use parse_js::ast::NodeData;
 use parse_js::ast::ObjectMemberType;
 use parse_js::ast::Syntax;
@@ -11,6 +12,7 @@ use parse_js::ast::VariableDeclarator;
 use parse_js::char::ID_CONTINUE_CHARSTR;
 use parse_js::char::ID_START_CHARSTR;
 use parse_js::lex::KEYWORD_STRS;
+use parse_js::operator::OperatorName;
 use parse_js::session::Session;
 use parse_js::session::SessionHashMap;
 use parse_js::session::SessionHashSet;
@@ -19,6 +21,7 @@ use parse_js::source::SourceRange;
 use parse_js::symbol::Identifier;
 use parse_js::symbol::Scope;
 use parse_js::symbol::ScopeFlag;
+use parse_js::symbol::ScopeType;
 use parse_js::symbol::Symbol;
 use parse_js::visit::JourneyControls;
 use parse_js::visit::Visitor;
@@ -100,23 +103,32 @@ impl<'a> MinifiedNameGenerator<'a> {
   }
 }
 
-// Our additional state that's associated with exactly one Symbol.
+// Our additional state that's associated with each Symbol.
 #[derive(Default)]
 struct MinifySymbol<'a> {
   minified_name: Option<SourceRange<'a>>,
   is_used_as_jsx_component: bool,
+  has_usage: bool,
+  // If this is true, and this symbol is associated with a function, don't transform the function into an arrow function, even if it doesn't use `this`.
+  is_used_as_constructor: bool,
+  // Similar to `is_used_as_constructor`, although a weaker signal, since the presence of `prototype` is highly likely to mean it's a constructor function, but not as certain as `new`.
+  has_prototype: bool,
 }
 
-// Our additional state that's associated with exactly one Scope.
+// Our additional state that's associated with each Scope.
 struct MinifyScope<'a> {
   // Variables that are declared by an ancestor (not own) scope (or is not declared anywhere and assumed to be global), and used by code in own or any descendant scope.
   inherited_vars: SessionHashSet<'a, Identifier<'a>>,
+  // Function declarations within this closure-like scope that must be hoisted to declarations at the very beginning of this closure's code (so we can transform them to `var` and still have them work correctly). There may be multiple closures with the same name, nested deep with many blocks and branches, which is why we use a map; the last visited (lexical) declaration wins. Note that this is only populated if this scope is a closure; function declarations don't hoist to blocks.
+  // Since they could be deep and anywhere, we must take them and move them into this map; we can't just look at a BlockStmt's children as they may not always be there.
+  hoisted_functions: SessionHashMap<'a, Identifier<'a>, Node<'a>>,
 }
 
 impl<'a> MinifyScope<'a> {
   pub fn new(session: &'a Session) -> MinifyScope<'a> {
     MinifyScope {
       inherited_vars: session.new_hashset(),
+      hoisted_functions: session.new_hashmap(),
     }
   }
 }
@@ -183,9 +195,11 @@ fn minify_names<'a>(
   }
 }
 
-// The first pass of the minifier. It does two things:
+// The first pass of the minifier. It does a few things:
 // - Detect all usages of JSX components, as React determines `<link>` to be the HTML tag and `<Link>` to be the variable `Link` as a component, so we cannot minify `Link` to `link` or `a0` or `bb` (i.e. make capitalised JSX elements uncapitalised).
 // - Find all references of variables so we can determine inherited variables (see `MinifiedNameGenerator` and `MinifyScope`). This is because JS allows variables to be lexically references before they're used, so we cannot do this in the same pass. For example, `let b = 1; { let a = () => b; let b = 2; }`.
+// - Move function declarations into `hoisted_functions`, so we can then place them back in the tree at the top of a closure in the second pass.
+// - Find uses of `new <var>` where `var` points to a function declaration and if so, set `is_used_as_constructor_function`.
 struct IdentifierPass<'a, 'b> {
   session: &'a Session,
   symbols: &'b mut SessionHashMap<'a, Symbol<'a>, MinifySymbol<'a>>,
@@ -197,7 +211,8 @@ impl<'a, 'b> IdentifierPass<'a, 'b> {
   fn process_variable_usage(&mut self, scope: Scope<'a>, name: Identifier<'a>) {
     let mut cur = Some(scope);
     while let Some(scope) = cur {
-      if scope.get_symbol(name).is_some() {
+      if let Some(sym) = scope.get_symbol(name) {
+        self.symbols.entry(sym).or_default().has_usage = true;
         break;
       };
       self
@@ -212,9 +227,37 @@ impl<'a, 'b> IdentifierPass<'a, 'b> {
 }
 
 impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
-  fn on_syntax(&mut self, n: &mut NodeData<'a>, _ctl: &mut JourneyControls) -> () {
+  fn on_syntax_down(&mut self, n: &mut NodeData<'a>, _ctl: &mut JourneyControls) -> () {
     let scope = n.scope;
     match &n.stx {
+      Syntax::MemberExpr { left, right, .. } if right.as_str() == "prototype" => {
+        if let Syntax::IdentifierExpr { name } = &left.stx {
+          if let Some(sym) = scope.find_symbol(*name) {
+            self.symbols.entry(sym).or_default().has_prototype = true;
+          };
+        }
+      }
+      Syntax::UnaryExpr {
+        parenthesised,
+        operator,
+        argument,
+      } if *operator == OperatorName::New => {
+        let var_name = match &argument.stx {
+          // e.g. `new Array()`.
+          Syntax::CallExpr { callee, .. } => match &callee.stx {
+            Syntax::IdentifierExpr { name } => Some(*name),
+            _ => None,
+          },
+          // e.g. `new Array`.
+          Syntax::IdentifierExpr { name } => Some(*name),
+          _ => None,
+        };
+        if let Some(var_name) = var_name {
+          if let Some(sym) = scope.find_symbol(var_name) {
+            self.symbols.entry(sym).or_default().is_used_as_constructor = true;
+          };
+        };
+      }
       Syntax::JsxMember { base: name, .. } => {
         self.process_variable_usage(scope, *name);
       }
@@ -235,6 +278,13 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
       Syntax::IdentifierPattern { name } => {
         self.process_variable_usage(scope, *name);
       }
+      // Same rationale as IdentifierPattern. Note that ClassOrObjectMemberKey::Direct doesn't use an IdentifierPattern, so we must visit it explicitly.
+      Syntax::ObjectPatternProperty { key, .. } => {
+        if let ClassOrObjectMemberKey::Direct(name) = key {
+          // TODO What if name is a keyword, number, string, etc.?
+          self.process_variable_usage(scope, *name);
+        }
+      }
       Syntax::IdentifierExpr { name } => {
         self.process_variable_usage(scope, *name);
       }
@@ -249,6 +299,31 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
       _ => {}
     }
   }
+
+  fn on_syntax_up(&mut self, n: &mut NodeData<'a>) -> () {
+    let scope = n.scope;
+    // This needs to be done when we iterate upwards and not downwards:
+    // - If we do it while iterating down, we won't traverse the function declaration's subtree, which we still need to do for the other tasks (e.g. tracking inherited variables).
+    // - It makes sense to cut out the pieces inside out (i.e. the nested parts that are function declarations), instead of removing the entire function declaration which itself may have some nested function declarations alongside other things.
+    let named_fn_decl_name = match &n.stx {
+      Syntax::FunctionDecl {
+        name: Some(name), ..
+      } => Some(name.loc),
+      _ => None,
+    };
+    if let Some(name) = named_fn_decl_name {
+      let decl_scope = scope
+        .find_self_or_ancestor(|t| t.is_closure_or_global())
+        .unwrap();
+      self
+        .scopes
+        .entry(decl_scope)
+        .or_insert_with(|| MinifyScope::new(self.session))
+        .hoisted_functions
+        .insert(name, n.replace(self.session, Syntax::EmptyStmt {}));
+      return;
+    };
+  }
 }
 
 // The second and main pass, that does most of the work. This should be run after the `minify_names` function.
@@ -257,6 +332,7 @@ struct MinifyPass<'a, 'b> {
   // Exports with the same exported name (including multiple default exports) are illegal, so we don't have to worry about/handle that case.
   export_bindings: &'b mut Vec<ExportBinding<'a>>,
   symbols: &'b mut SessionHashMap<'a, Symbol<'a>, MinifySymbol<'a>>,
+  scopes: &'b mut SessionHashMap<'a, Scope<'a>, MinifyScope<'a>>,
 }
 
 impl<'a, 'b> MinifyPass<'a, 'b> {
@@ -303,12 +379,23 @@ impl<'a, 'b> MinifyPass<'a, 'b> {
 }
 
 impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
-  fn on_syntax(&mut self, node: &mut NodeData<'a>, ctl: &mut JourneyControls) -> () {
+  fn on_syntax_down(&mut self, node: &mut NodeData<'a>, ctl: &mut JourneyControls) -> () {
     // We must not use `node.` after this point, as we're now borrowing it as mut.
     let loc = node.loc;
     let scope = node.scope;
     let mut new_stx: Option<Syntax<'_>> = None;
     match &mut node.stx {
+      Syntax::TopLevel { body } | Syntax::BlockStmt { body } => {
+        // TODO Are all global/closure scopes associated with exactly one BlockStmt or TopLevel?
+        if scope.typ().is_closure_or_global() {
+          if let Some(min_scope) = self.scopes.get_mut(&scope) {
+            for fn_decl in min_scope.hoisted_functions.values_mut() {
+              // TODO Batch prepend to avoid repeated Vec shifting.
+              body.insert(0, fn_decl.take(self.session));
+            }
+          };
+        };
+      }
       Syntax::ArrowFunctionExpr {
         parenthesised,
         is_async,
@@ -375,6 +462,9 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
           && !*generator
           && !fn_scope.has_flag(ScopeFlag::UsesArguments)
           && !fn_scope.has_flag(ScopeFlag::UsesThis)
+          // Use `find_symbol` as we might not be in a closure scope and the function declaration's symbol would've been added to an ancestor.
+          // If no symbol is found (e.g. global), or it exists but is not `is_used_as_constructor` and not `has_prototype`, then we can safely proceed.
+          && scope.find_symbol(name.as_ref().unwrap().loc).and_then(|sym| self.symbols.get(&sym)).filter(|sym| sym.is_used_as_constructor || sym.has_prototype).is_none()
         {
           let var_decl_pat = new_node(
             self.session,
@@ -526,12 +616,11 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
         match key {
           ClassOrObjectMemberKey::Direct(name) => {
             if target.is_none() {
-              let sym = scope.find_symbol(*name);
-              if let Some(sym) = sym {
-                let minified = self.symbols[&sym].minified_name.unwrap();
+              if scope.find_symbol(*name).is_some() {
+                // If the symbol declaration exists, we know it definitely has a minified name. However, because the parser recurses into changed subtrees, we must simply expand this property with a IdentifierPattern target referencing the original name, so that the visitor for it will then change it to the minified name. Otherwise, we'll retrieve the minified name for a minified name, which is incorrect. Note that we can't simply skip the subtree entirely as there are still other parts.
                 let replacement_target_node =
-                  new_node(self.session, scope, minified, Syntax::IdentifierPattern {
-                    name: minified,
+                  new_node(self.session, scope, loc, Syntax::IdentifierPattern {
+                    name: *name,
                   });
                 new_stx = Some(Syntax::ObjectPatternProperty {
                   key: key.take(),
@@ -547,12 +636,11 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
       Syntax::ObjectMember { typ } => {
         match typ {
           ObjectMemberType::Shorthand { name } => {
-            let sym = scope.find_symbol(*name);
-            if let Some(sym) = sym {
-              let minified = self.symbols[&sym].minified_name.unwrap();
+            if scope.find_symbol(*name).is_some() {
+              // See Syntax::ObjectPatternProperty > ClassOrObjectMemberKey::Direct match branch.
               let replacement_initializer_node =
-                new_node(self.session, scope, minified, Syntax::IdentifierExpr {
-                  name: minified,
+                new_node(self.session, scope, loc, Syntax::IdentifierExpr {
+                  name: *name,
                 });
               new_stx = Some(Syntax::ObjectMember {
                 typ: ObjectMemberType::Valued {
@@ -589,7 +677,7 @@ pub fn minify_js<'a>(session: &'a Session, top_level_node: &mut NodeData<'a>) ->
     symbols: &mut symbols,
     scopes: &mut scopes,
   };
-  identifier_pass.visit_top_level(top_level_node);
+  identifier_pass.visit(top_level_node);
 
   minify_names(session, top_level_scope, &mut scopes, &mut symbols);
 
@@ -598,8 +686,9 @@ pub fn minify_js<'a>(session: &'a Session, top_level_node: &mut NodeData<'a>) ->
     session,
     export_bindings: &mut export_bindings,
     symbols: &mut symbols,
+    scopes: &mut scopes,
   };
-  minify_pass.visit_top_level(top_level_node);
+  minify_pass.visit(top_level_node);
 
   let mut export_names = session.new_vec();
   for e in export_bindings.iter() {

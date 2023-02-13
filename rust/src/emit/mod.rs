@@ -161,7 +161,14 @@ fn emit_class_or_object_member<'a>(
     ClassOrObjectMemberValue::Property { initializer } => {
       if let Some(v) = initializer {
         out.extend_from_slice(value_delimiter);
+        let is_comma = is_comma_expression(&v.stx);
+        if is_comma {
+          out.extend_from_slice(b"(");
+        };
         emit_js(out, *v);
+        if is_comma {
+          out.extend_from_slice(b")");
+        };
       };
     }
     ClassOrObjectMemberValue::Setter { body, parameter } => {
@@ -273,6 +280,7 @@ fn get_leaf_node_type<'a>(n: &NodeData<'a>) -> LeafNodeType {
     Syntax::BlockStmt { .. } => LeafNodeType::Block,
     Syntax::EmptyStmt {} => LeafNodeType::EmptyStmt,
     Syntax::TryStmt { .. } => LeafNodeType::Block,
+    Syntax::SwitchStmt { .. } => LeafNodeType::Block,
     _ => LeafNodeType::Other,
   }
 }
@@ -286,10 +294,13 @@ fn emit_statements<'a>(out: &mut Vec<u8>, statements: &[&mut NodeData<'a>]) -> (
   for n in statements {
     if let Some(n) = last_statement {
       match &n.stx {
-        Syntax::EmptyStmt {} | Syntax::FunctionDecl { .. } | Syntax::ClassDecl { .. } => {}
-        _ => {
-          out.extend_from_slice(b";");
-        }
+        Syntax::BlockStmt { .. }
+        | Syntax::ClassDecl { .. }
+        | Syntax::EmptyStmt {}
+        | Syntax::FunctionDecl { .. }
+        | Syntax::SwitchStmt { .. }
+        | Syntax::TryStmt { .. } => {}
+        _ => out.extend_from_slice(b";"),
       }
     }
     emit_js(out, *n);
@@ -299,6 +310,23 @@ fn emit_statements<'a>(out: &mut Vec<u8>, statements: &[&mut NodeData<'a>]) -> (
     if get_leaf_node_type(n) == LeafNodeType::EmptyStmt {
       out.extend_from_slice(b";");
     }
+  }
+}
+
+fn is_comma_expression<'a>(stx: &Syntax<'a>) -> bool {
+  match stx {
+    Syntax::BinaryExpr { operator, .. } => *operator == OperatorName::Comma,
+    _ => false,
+  }
+}
+
+fn leftmost_expression<'a, 'b>(stx: &'b Syntax<'a>) -> &'b Syntax<'a> {
+  match stx {
+    Syntax::ComputedMemberExpr { object, .. } => leftmost_expression(&object.stx),
+    Syntax::MemberExpr { left, .. } | Syntax::BinaryExpr { left, .. } => {
+      leftmost_expression(&left.stx)
+    }
+    _ => stx,
   }
 }
 
@@ -514,9 +542,13 @@ fn emit_js_under_operator<'a>(
       };
       out.extend_from_slice(b"=>");
       let must_parenthesise_body = match &body.stx {
-        Syntax::LiteralObjectExpr { .. } => true,
-        Syntax::BinaryExpr { operator, .. } if *operator == OperatorName::Comma => true,
-        _ => false,
+        expr if is_comma_expression(expr) => true,
+        // `{a: b}.b`, `{a: b} + 1`, etc. need to be wrapped.
+        // TODO Refine and verify.
+        expr => match leftmost_expression(expr) {
+          Syntax::LiteralObjectExpr { .. } => true,
+          _ => false,
+        },
       };
       if must_parenthesise_body {
         out.extend_from_slice(b"(");

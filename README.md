@@ -23,7 +23,7 @@ Comparison with esbuild, run on [common libraries](./bench).
 - Analyses scopes and variable visibilities.
 - Minification of identifiers.
 - Omits semicolons, spaces, parentheses, and braces where possible.
-- Transforms functions to arrow functions when `this` or `arguments` aren't used.
+- Transforms functions to arrow functions when `new`, `this`, `arguments`, and `prototype` aren't used.
 
 ## Usage
 
