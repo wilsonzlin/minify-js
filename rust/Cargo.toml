@@ -14,7 +14,7 @@ version = "0.5.0"
 
 [dependencies]
 lazy_static = "1.4"
-parse-js = { version = "0.13.1", path = "../vend/parse-js/rust" }
+parse-js = "0.13.1"
 
 [features]
 serialize = ["parse-js/serialize"]
