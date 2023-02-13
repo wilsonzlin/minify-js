@@ -54,11 +54,11 @@ fn test_emit_global() {
     "\
       function*gen(){yield*\"hello world!\"}\
       !()=>{\
+      var a=(()=>{a()});\
       com.java.names.long;\
       module.functions;\
-      var a=(()=>{a()});\
       var b=1,c,{brown:d,_:[e,f,,,...g],...h}=i;\
-      (({the:b}=a,[c]=2)=>{{let b=a(e)};b,c,d,e;return;1.2.toString()})();\
+      (({the:b}=a,[c]=2)=>{{let b=a(e)}b,c,d,e;return;1.2.toString()})();\
       const j=({})=>{};\
       const k=a=>(1,2),l=(1/7)/(2/7)\
       }()\
@@ -100,7 +100,7 @@ fn test_emit_module() {
       const g=1;\
       const {meaning:h}={meaning:42},i=10;\
       console.log(\"meaning\",h);\
-      var j=(()=>{});\
+      function j(){}\
       console.log(j(i));\
       f.hello();\
       export{h as meaning,i as life,j as default,b as use_state,c as reactUseEffect}\
@@ -114,7 +114,7 @@ fn test_emit_module() {
     "#,
     "\
       const a=1;\
-      export default function(){};\
+      export default function(){}\
       export{a as x}\
     ",
   );

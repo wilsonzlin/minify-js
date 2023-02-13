@@ -305,10 +305,13 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
     // This needs to be done when we iterate upwards and not downwards:
     // - If we do it while iterating down, we won't traverse the function declaration's subtree, which we still need to do for the other tasks (e.g. tracking inherited variables).
     // - It makes sense to cut out the pieces inside out (i.e. the nested parts that are function declarations), instead of removing the entire function declaration which itself may have some nested function declarations alongside other things.
+    // TODO Consider `export` and `export default`.
     let named_fn_decl_name = match &n.stx {
       Syntax::FunctionDecl {
-        name: Some(name), ..
-      } => Some(name.loc),
+        export,
+        name: Some(name),
+        ..
+      } if !*export => Some(name.loc),
       _ => None,
     };
     if let Some(name) = named_fn_decl_name {
@@ -446,19 +449,22 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
         };
       }
       Syntax::FunctionDecl {
+        export,
         body,
         generator,
         is_async,
         name,
         signature,
-      } => {
+        ..
+      } if !*export => {
         let fn_scope = body.scope;
         // TODO Consider `export function` and `export default function`.
         // TODO Detect property access of "prototype" on variable referencing function to reduce (but not remove) false negatives.
         // TODO Can this work sometimes even when `arguments` is used?
         // TODO This is still not risk-free, as the function's prototype could still be used even if there is no `this`.
         // TODO Detect `function(){}.bind(this)`, which is pretty much risk free unless somehow Function.prototype.bind has been overridden. However, any other value for the first argument of `.bind` means that it is no longer safe.
-        if name.is_some()
+        if !*export
+          && name.is_some()
           && !*generator
           && !fn_scope.has_flag(ScopeFlag::UsesArguments)
           && !fn_scope.has_flag(ScopeFlag::UsesThis)
@@ -489,6 +495,7 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
             },
           );
           let var_decl = new_node(self.session, scope, loc, Syntax::VarDecl {
+            export: false,
             // We must use `var` to have the same hoisting and shadowing semantics.
             // TODO Are there some differences e.g. reassignment, shadowing, hoisting, redeclaration, and use-before-assignment/declaration?
             mode: VarDeclMode::Var,
@@ -554,38 +561,43 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
           });
         };
       }
-      Syntax::ExportDeclStmt {
-        declaration,
-        default,
-      } => match &mut declaration.stx {
-        Syntax::ClassDecl { name, .. } | Syntax::FunctionDecl { name, .. } => {
-          match name {
-            Some(name) => match &name.stx {
-              Syntax::ClassOrFunctionName { name } => {
-                self.export_bindings.push(ExportBinding {
-                  target: *name,
-                  alias: if *default {
-                    SourceRange::from_slice(b"default")
-                  } else {
-                    *name
-                  },
-                });
-              }
-              _ => unreachable!(),
-            },
-            _ => {}
+      Syntax::ClassDecl {
+        export,
+        export_default,
+        name,
+        ..
+      }
+      | Syntax::FunctionDecl {
+        export,
+        export_default,
+        name,
+        ..
+      } if *export => {
+        if let Some(name) = name {
+          match &name.stx {
+            Syntax::ClassOrFunctionName { name } => {
+              self.export_bindings.push(ExportBinding {
+                target: *name,
+                alias: if *export_default {
+                  SourceRange::from_slice(b"default")
+                } else {
+                  *name
+                },
+              });
+            }
+            _ => unreachable!(),
           };
         }
-        Syntax::VarStmt { declaration } => match &mut declaration.stx {
-          Syntax::VarDecl { declarators, .. } => {
-            for decl in declarators.iter_mut() {
-              self.visit_exported_pattern(decl.pattern);
-            }
-          }
-          _ => unreachable!(),
-        },
-        _ => unreachable!(),
-      },
+      }
+      Syntax::VarDecl {
+        export,
+        declarators,
+        ..
+      } if *export => {
+        for decl in declarators.iter_mut() {
+          self.visit_exported_pattern(decl.pattern);
+        }
+      }
       Syntax::ExportListStmt { names, from } => {
         ctl.skip();
         match from {

@@ -292,6 +292,9 @@ fn emit_statements<'a>(out: &mut Vec<u8>, statements: &[&mut NodeData<'a>]) -> (
   // Since we skip over some statements, the last actual statement may not be the last in the list.
   let mut last_statement: Option<&NodeData<'a>> = None;
   for n in statements {
+    if let Syntax::EmptyStmt {} = n.stx {
+      continue;
+    };
     if let Some(n) = last_statement {
       match &n.stx {
         Syntax::BlockStmt { .. }
@@ -376,7 +379,10 @@ fn emit_js_under_operator<'a>(
       }
       out.extend_from_slice(b"`");
     }
-    Syntax::VarDecl { mode, declarators } => {
+    Syntax::VarDecl {
+      mode, declarators, ..
+    } => {
+      // We split all `export var/let/const` into a declaration and an export at the end, so drop the `export`.
       out.extend_from_slice(match mode {
         VarDeclMode::Const => b"const",
         VarDeclMode::Let => b"let",
@@ -454,19 +460,35 @@ fn emit_js_under_operator<'a>(
       }
     }
     Syntax::ClassDecl {
+      export,
+      export_default,
       name,
       extends,
       members,
     } => {
+      // We split all `export class/function` into a declaration and an export at the end, so drop the `export`.
+      // The exception is for unnamed functions and classes.
+      if *export && name.is_none() {
+        debug_assert!(*export_default);
+        out.extend_from_slice(b"export default ");
+      }
       emit_class(out, name, extends, members);
     }
     Syntax::FunctionDecl {
+      export,
+      export_default,
       is_async,
       generator,
       name,
       signature,
       body,
     } => {
+      // We split all `export class/function` into a declaration and an export at the end, so drop the `export`.
+      // The exception is for unnamed functions and classes.
+      if *export && name.is_none() {
+        debug_assert!(*export_default);
+        out.extend_from_slice(b"export default ");
+      }
       if *is_async {
         out.extend_from_slice(b"async ");
       }
@@ -883,21 +905,6 @@ fn emit_js_under_operator<'a>(
       out.extend_from_slice(b"[");
       emit_js(out, *member);
       out.extend_from_slice(b"]");
-    }
-    // We split all `export class/function` into a declaration and an export at the end, so drop the `export`.
-    // The exception is for unnamed functions and classes.
-    Syntax::ExportDeclStmt {
-      declaration,
-      default,
-    } => {
-      match &declaration.stx {
-        Syntax::ClassDecl { name, .. } | Syntax::FunctionDecl { name, .. } if name.is_none() => {
-          debug_assert!(default);
-          out.extend_from_slice(b"export default ");
-        }
-        _ => {}
-      };
-      emit_js(out, *declaration);
     }
     Syntax::ExportDefaultExprStmt { expression } => {
       out.extend_from_slice(b"export default ");
