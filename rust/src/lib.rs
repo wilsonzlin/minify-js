@@ -32,11 +32,12 @@ pub fn emit<'a>(node: Node<'a>, output: &mut Vec<u8>) -> () {
 /// # Examples
 ///
 /// ```
-/// use minify_js::{TopLevelMode, minify};
+/// use minify_js::{Session, TopLevelMode, minify};
 ///
 /// let mut code: &[u8] = b"const main = () => { let my_first_variable = 1; };";
+/// let session = Session::new();
 /// let mut out = Vec::new();
-/// minify(TopLevelMode::Global, code.to_vec(), &mut out).unwrap();
+/// minify(&session, TopLevelMode::Global, code, &mut out).unwrap();
 /// assert_eq!(out.as_slice(), b"const main=()=>{let a=1}");
 /// ```
 pub fn minify<'a>(

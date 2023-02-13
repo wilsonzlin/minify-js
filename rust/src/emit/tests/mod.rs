@@ -10,11 +10,11 @@ fn check(top_level_mode: TopLevelMode, src: &str, expected: &str) -> () {
   let session = Session::new();
   let mut parser = Parser::new(Lexer::new(src.as_bytes()));
   let node = parser.parse_top_level(&session, top_level_mode).unwrap();
-  let mut out = BufWriter::new(Vec::new());
+  let mut out = Vec::new();
   minify_js(&session, node);
-  emit_js(&mut out, node).unwrap();
+  emit_js(&mut out, node);
   assert_eq!(
-    unsafe { std::str::from_utf8_unchecked(out.get_ref().as_slice()) },
+    unsafe { std::str::from_utf8_unchecked(out.as_slice()) },
     expected
   );
 }
@@ -57,11 +57,11 @@ fn test_emit_global() {
       !()=>{\
       com.java.names.long;\
       module.functions;\
-      function a(){a()}\
+      var a=(()=>{a()});\
       var b=1,c,{brown:d,_:[e,f,,,...g],...h}=i;\
-      (({the:l}=a,[m]=2)=>{{let n=a(e)};l,m,d,e;return;1.2.toString()})();\
-      const i=({})=>{};\
-      const j=l=>(1,2),k=(1/7)/(2/7)\
+      (({the:b}=a,[c]=2)=>{{let b=a(e)};b,c,d,e;return;1.2.toString()})();\
+      const j=({})=>{};\
+      const k=a=>(1,2),l=(1/7)/(2/7)\
       }()\
     ",
   )
@@ -101,7 +101,7 @@ fn test_emit_module() {
       const g=1;\
       const {meaning:h}={meaning:42},i=10;\
       console.log(\"meaning\",h);\
-      function j(){};\
+      var j=(()=>{});\
       console.log(j(i));\
       f.hello();\
       export{h as meaning,i as life,j as default,b as use_state,c as reactUseEffect}\
@@ -205,7 +205,7 @@ fn test_emit_nested_blockless_statements() {
           else g = h
       }
     "#,
-    "var fn=((a,b)=>{if(a)if(b)try{c()}catch(c){e(f)}else g=h})",
+    "var fn=((a,b)=>{if(a)if(b)try{c()}catch(a){e(f)}else g=h})",
   );
 }
 
@@ -222,6 +222,6 @@ fn test_emit_jsx() {
 
       render(<CompImp><CompLocal/></CompImp>);
     "#,
-    r#"import Ƽa from"./comp";let b={a:"div"};const Ƽc=()=><b.a><strong/></b.a>;render(<Ƽa><Ƽc/></Ƽa>)"#,
+    r#"import A from"./comp";let a={a:"div"};const B=()=><a.a><strong/></a.a>;render(<A><B/></A>)"#,
   );
 }
