@@ -4,7 +4,6 @@ use crate::TopLevelMode;
 use parse_js::lex::Lexer;
 use parse_js::parse::Parser;
 use parse_js::session::Session;
-use std::io::BufWriter;
 
 fn check(top_level_mode: TopLevelMode, src: &str, expected: &str) -> () {
   let session = Session::new();
