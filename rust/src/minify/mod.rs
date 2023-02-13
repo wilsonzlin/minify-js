@@ -1,8 +1,10 @@
+use parse_js::ast::new_node;
 use parse_js::ast::ClassOrObjectMemberKey;
 use parse_js::ast::ClassOrObjectMemberValue;
 use parse_js::ast::ExportName;
 use parse_js::ast::ExportNames;
 use parse_js::ast::Node;
+use parse_js::ast::NodeData;
 use parse_js::ast::ObjectMemberType;
 use parse_js::ast::Syntax;
 use parse_js::ast::VarDeclMode;
@@ -92,13 +94,13 @@ struct JsxVisitor<'a, 'b> {
 }
 
 impl<'a, 'b> Visitor<'a> for JsxVisitor<'a, 'b> {
-  fn on_syntax(&mut self, n: Node<'a>, _ctl: &mut JourneyControls) -> () {
-    match &*n.stx() {
+  fn on_syntax(&mut self, n: &mut NodeData<'a>, _ctl: &mut JourneyControls) -> () {
+    match &n.stx {
       Syntax::JsxName {
         namespace: None,
         name,
       } if !name.as_slice()[0].is_ascii_lowercase() => {
-        match n.scope().find_symbol(*name) {
+        match n.scope.find_symbol(*name) {
           Some(sym) => self
             .symbols
             .entry(sym)
@@ -122,8 +124,8 @@ struct MinifyVisitor<'a, 'b> {
 }
 
 impl<'a, 'b> MinifyVisitor<'a, 'b> {
-  fn visit_exported_pattern(&mut self, n: Node<'a>) -> () {
-    match &*n.stx() {
+  fn visit_exported_pattern(&mut self, n: &mut NodeData<'a>) -> () {
+    match &mut n.stx {
       Syntax::ArrayPattern { elements, rest } => {
         for e in elements {
           if let Some(e) = e {
@@ -165,28 +167,27 @@ impl<'a, 'b> MinifyVisitor<'a, 'b> {
 }
 
 impl<'a, 'b> Visitor<'a> for MinifyVisitor<'a, 'b> {
-  fn on_syntax(&mut self, node: Node<'a>, ctl: &mut JourneyControls) -> () {
-    let mut node_data = node.get_mut();
+  fn on_syntax(&mut self, node: &mut NodeData<'a>, ctl: &mut JourneyControls) -> () {
     // We must not use `node.` after this point, as we're now borrowing it as mut.
-    let loc = node_data.loc;
-    let scope = node_data.scope;
-    let mut new_stx: Option<Syntax<'a>> = None;
-    match &node_data.stx {
+    let loc = node.loc;
+    let scope = node.scope;
+    let mut new_stx: Option<Syntax<'_>> = None;
+    match &mut node.stx {
       Syntax::ArrowFunctionExpr {
         parenthesised,
         is_async,
         signature,
         body,
       } => {
-        if let Syntax::BlockStmt { body } = &*body.stx() {
+        if let Syntax::BlockStmt { body } = &mut body.stx {
           if body.len() == 1 {
-            if let Syntax::ReturnStmt { value } = &*body[0].stx() {
+            if let Syntax::ReturnStmt { value } = &mut body[0].stx {
               if let Some(return_value) = value {
                 new_stx = Some(Syntax::ArrowFunctionExpr {
                   parenthesised: *parenthesised,
                   is_async: *is_async,
-                  signature: *signature,
-                  body: *return_value,
+                  signature: signature.take(self.session),
+                  body: return_value.take(self.session),
                 });
               }
             };
@@ -201,7 +202,7 @@ impl<'a, 'b> Visitor<'a> for MinifyVisitor<'a, 'b> {
         signature,
         body,
       } => {
-        let fn_scope = body.scope();
+        let fn_scope = body.scope;
         // TODO This will still work for named functions as long as that name isn't used (including if it's shadowed).
         // TODO Detect property access of "prototype" on variable referencing function to reduce (but not remove) false negatives.
         // TODO Can this work sometimes even when `arguments` is used?
@@ -216,8 +217,8 @@ impl<'a, 'b> Visitor<'a> for MinifyVisitor<'a, 'b> {
             // TODO
             parenthesised: true,
             is_async: *is_async,
-            signature: *signature,
-            body: *body,
+            signature: signature.take(self.session),
+            body: body.take(self.session),
           });
         };
       }
@@ -228,7 +229,7 @@ impl<'a, 'b> Visitor<'a> for MinifyVisitor<'a, 'b> {
         name,
         signature,
       } => {
-        let fn_scope = body.scope();
+        let fn_scope = body.scope;
         // TODO Consider `export function` and `export default function`.
         // TODO Detect property access of "prototype" on variable referencing function to reduce (but not remove) false negatives.
         // TODO Can this work sometimes even when `arguments` is used?
@@ -239,16 +240,16 @@ impl<'a, 'b> Visitor<'a> for MinifyVisitor<'a, 'b> {
           && !fn_scope.has_flag(ScopeFlag::UsesArguments)
           && !fn_scope.has_flag(ScopeFlag::UsesThis)
         {
-          let var_decl_pat = Node::new(
+          let var_decl_pat = new_node(
             self.session,
             // TODO Is this scope correct?
             scope,
-            name.unwrap().loc(),
+            name.as_ref().unwrap().loc,
             Syntax::IdentifierPattern {
-              name: name.unwrap().loc(),
+              name: name.as_ref().unwrap().loc,
             },
           );
-          let var_decl_init = Node::new(
+          let var_decl_init = new_node(
             self.session,
             // TODO Is this scope correct?
             scope,
@@ -257,11 +258,11 @@ impl<'a, 'b> Visitor<'a> for MinifyVisitor<'a, 'b> {
               // TODO
               parenthesised: true,
               is_async: *is_async,
-              signature: *signature,
-              body: *body,
+              signature: signature.take(self.session),
+              body: body.take(self.session),
             },
           );
-          let var_decl = Node::new(self.session, scope, loc, Syntax::VarDecl {
+          let var_decl = new_node(self.session, scope, loc, Syntax::VarDecl {
             // We must use `var` to have the same hoisting and shadowing semantics.
             // TODO Are there some differences e.g. reassignment, shadowing, hoisting, redeclaration, and use-before-assignment/declaration?
             mode: VarDeclMode::Var,
@@ -280,41 +281,63 @@ impl<'a, 'b> Visitor<'a> for MinifyVisitor<'a, 'b> {
           });
         }
       }
-      stx @ (Syntax::IdentifierPattern { name }
-      | Syntax::IdentifierExpr { name }
-      | Syntax::ClassOrFunctionName { name }
-      | Syntax::JsxMember { base: name, .. }
-      | Syntax::JsxName {
-        name,
-        namespace: None,
-      }) => {
+      Syntax::IdentifierPattern { name } => {
         let sym = scope.find_symbol(*name);
         // TODO JsxMember and JsxNamespacedName must be capitalised to be interpreted as a component.
         if let Some(sym) = sym {
           let minified = self.symbols[&sym].generate_minified_name_with_edit(self.session, *name);
-          new_stx = Some(match stx {
-            Syntax::IdentifierPattern { .. } => Syntax::IdentifierPattern { name: minified },
-            Syntax::IdentifierExpr { .. } => Syntax::IdentifierExpr { name: minified },
-            Syntax::ClassOrFunctionName { .. } => Syntax::ClassOrFunctionName { name: minified },
-            Syntax::JsxMember { path, .. } => Syntax::JsxMember {
-              base: minified,
-              path: path.clone(),
-            },
-            Syntax::JsxName { namespace, .. } => Syntax::JsxName {
-              namespace: namespace.clone(),
-              name: minified,
-            },
-            _ => unreachable!(),
+          new_stx = Some(Syntax::IdentifierPattern { name: minified });
+        };
+      }
+      Syntax::IdentifierExpr { name } => {
+        let sym = scope.find_symbol(*name);
+        // TODO JsxMember and JsxNamespacedName must be capitalised to be interpreted as a component.
+        if let Some(sym) = sym {
+          let minified = self.symbols[&sym].generate_minified_name_with_edit(self.session, *name);
+          new_stx = Some(Syntax::IdentifierExpr { name: minified });
+        };
+      }
+      Syntax::ClassOrFunctionName { name } => {
+        let sym = scope.find_symbol(*name);
+        if let Some(sym) = sym {
+          let minified = self.symbols[&sym].generate_minified_name_with_edit(self.session, *name);
+          new_stx = Some(Syntax::ClassOrFunctionName { name: minified });
+        };
+      }
+      Syntax::JsxMember {
+        base: name, path, ..
+      } => {
+        let sym = scope.find_symbol(*name);
+        // TODO JsxMember and JsxNamespacedName must be capitalised to be interpreted as a component.
+        if let Some(sym) = sym {
+          let minified = self.symbols[&sym].generate_minified_name_with_edit(self.session, *name);
+          new_stx = Some(Syntax::JsxMember {
+            base: minified,
+            path: path.clone(),
+          });
+        };
+      }
+      Syntax::JsxName {
+        name,
+        namespace: None,
+      } => {
+        let sym = scope.find_symbol(*name);
+        // TODO JsxMember and JsxNamespacedName must be capitalised to be interpreted as a component.
+        if let Some(sym) = sym {
+          let minified = self.symbols[&sym].generate_minified_name_with_edit(self.session, *name);
+          new_stx = Some(Syntax::JsxName {
+            namespace: None,
+            name: minified,
           });
         };
       }
       Syntax::ExportDeclStmt {
         declaration,
         default,
-      } => match &*declaration.stx() {
+      } => match &mut declaration.stx {
         Syntax::ClassDecl { name, .. } | Syntax::FunctionDecl { name, .. } => {
           match name {
-            Some(name) => match &*name.stx() {
+            Some(name) => match &name.stx {
               Syntax::ClassOrFunctionName { name } => {
                 self.export_bindings.push(ExportBinding {
                   target: name.clone(),
@@ -330,9 +353,9 @@ impl<'a, 'b> Visitor<'a> for MinifyVisitor<'a, 'b> {
             _ => {}
           };
         }
-        Syntax::VarStmt { declaration } => match &*declaration.stx() {
+        Syntax::VarStmt { declaration } => match &mut declaration.stx {
           Syntax::VarDecl { declarators, .. } => {
-            for decl in declarators {
+            for decl in declarators.iter_mut() {
               self.visit_exported_pattern(decl.pattern);
             }
           }
@@ -348,7 +371,7 @@ impl<'a, 'b> Visitor<'a> for MinifyVisitor<'a, 'b> {
               for e in names {
                 self.export_bindings.push(ExportBinding {
                   target: e.target.clone(),
-                  alias: match &*e.alias.stx() {
+                  alias: match &e.alias.stx {
                     Syntax::IdentifierPattern { name } => name.clone(),
                     _ => unreachable!(),
                   },
@@ -375,13 +398,13 @@ impl<'a, 'b> Visitor<'a> for MinifyVisitor<'a, 'b> {
                 let minified =
                   self.symbols[&sym].generate_minified_name_with_edit(self.session, *name);
                 let replacement_target_node =
-                  Node::new(self.session, scope, minified, Syntax::IdentifierPattern {
+                  new_node(self.session, scope, minified, Syntax::IdentifierPattern {
                     name: minified,
                   });
                 new_stx = Some(Syntax::ObjectPatternProperty {
-                  key: *key,
+                  key: key.take(),
                   target: Some(replacement_target_node),
-                  default_value: *default_value,
+                  default_value: default_value.take(),
                 });
               };
             }
@@ -397,7 +420,7 @@ impl<'a, 'b> Visitor<'a> for MinifyVisitor<'a, 'b> {
               let minified =
                 self.symbols[&sym].generate_minified_name_with_edit(self.session, *name);
               let replacement_initializer_node =
-                Node::new(self.session, scope, minified, Syntax::IdentifierExpr {
+                new_node(self.session, scope, minified, Syntax::IdentifierExpr {
                   name: minified,
                 });
               new_stx = Some(Syntax::ObjectMember {
@@ -417,13 +440,13 @@ impl<'a, 'b> Visitor<'a> for MinifyVisitor<'a, 'b> {
     };
 
     if let Some(new_stx) = new_stx {
-      node_data.stx = new_stx;
+      node.stx = new_stx;
     }
   }
 }
 
-pub fn minify_js<'a>(session: &'a Session, top_level_node: Node<'a>) -> () {
-  let top_level_scope = top_level_node.scope();
+pub fn minify_js<'a>(session: &'a Session, top_level_node: &mut NodeData<'a>) -> () {
+  let top_level_scope = top_level_node.scope;
 
   let mut symbols = session.new_hashmap::<Symbol, MinifySymbol>();
   let mut scopes = session.new_vec();
@@ -474,7 +497,7 @@ pub fn minify_js<'a>(session: &'a Session, top_level_node: Node<'a>) -> () {
       .expect(format!("failed to find top-level export `{:?}`", e.target).as_str());
     export_names.push(ExportName {
       target: symbols[&target_symbol].generate_minified_name_with_edit(session, e.target),
-      alias: Node::new(
+      alias: new_node(
         session,
         top_level_scope,
         e.alias,
@@ -484,16 +507,16 @@ pub fn minify_js<'a>(session: &'a Session, top_level_node: Node<'a>) -> () {
   }
 
   if !export_names.is_empty() {
-    let final_export_stmt = Node::new(
+    let final_export_stmt = new_node(
       session,
       top_level_scope,
-      top_level_node.loc().get_end_of_source(),
+      top_level_node.loc.get_end_of_source(),
       Syntax::ExportListStmt {
         names: ExportNames::Specific(export_names),
         from: None,
       },
     );
-    match &mut *top_level_node.stx_mut() {
+    match &mut top_level_node.stx {
       Syntax::TopLevel { body } => {
         body.push(final_export_stmt);
       }

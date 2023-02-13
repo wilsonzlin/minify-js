@@ -9,6 +9,7 @@ use parse_js::ast::ForStmtHeader;
 use parse_js::ast::ForThreeInit;
 use parse_js::ast::LiteralTemplatePart;
 use parse_js::ast::Node;
+use parse_js::ast::NodeData;
 use parse_js::ast::ObjectMemberType;
 use parse_js::ast::Syntax;
 use parse_js::ast::VarDeclMode;
@@ -180,8 +181,8 @@ fn emit_class_or_object_member<'a>(
 
 fn emit_class<'a>(
   out: &mut Vec<u8>,
-  name: Option<Node<'a>>,
-  extends: Option<Node<'a>>,
+  name: &Option<&mut NodeData<'a>>,
+  extends: &Option<&mut NodeData<'a>>,
   members: &SessionVec<'a, ClassMember<'a>>,
 ) -> () {
   out.extend_from_slice(b"class");
@@ -247,7 +248,7 @@ fn emit_import_or_export_statement_trailer<'a>(
 }
 
 // NOTE: We no longer support outputting to a generic Write, as that incurs significant performance overhead (even with a BufWriter<Vec<u8>>) and our parser is not streaming anyway.
-pub fn emit_js<'a>(out: &mut Vec<u8>, n: Node<'a>) -> () {
+pub fn emit_js<'a>(out: &mut Vec<u8>, n: &NodeData<'a>) -> () {
   emit_js_under_operator(out, n, None);
 }
 
@@ -258,8 +259,8 @@ enum LeafNodeType {
   Block,
 }
 
-fn get_leaf_node_type<'a>(n: Node<'a>) -> LeafNodeType {
-  match &*n.stx() {
+fn get_leaf_node_type<'a>(n: &NodeData<'a>) -> LeafNodeType {
+  match &n.stx {
     Syntax::WhileStmt { body, .. } | Syntax::ForStmt { body, .. } => get_leaf_node_type(*body),
     Syntax::LabelStmt { statement, .. } => get_leaf_node_type(*statement),
     Syntax::IfStmt {
@@ -280,12 +281,12 @@ fn get_leaf_node_type<'a>(n: Node<'a>) -> LeafNodeType {
 // It's important to use this function:
 // - Omit semicolons where possible.
 // - Insert semicolon after last statement if its leaf is a `if`, `for`, `while`, or `with` statement with an empty statement as its body e.g. `if (x) label: for (;;) while (x)` but not `if (x) for (;;) label: while (x) {}` or `if (x) for (;;) label: while (x) return`.
-fn emit_statements<'a>(out: &mut Vec<u8>, statements: &[Node<'a>]) -> () {
+fn emit_statements<'a>(out: &mut Vec<u8>, statements: &[&mut NodeData<'a>]) -> () {
   // Since we skip over some statements, the last actual statement may not be the last in the list.
-  let mut last_statement: Option<Node<'a>> = None;
+  let mut last_statement: Option<&NodeData<'a>> = None;
   for n in statements {
     if let Some(n) = last_statement {
-      match &*n.stx() {
+      match &n.stx {
         Syntax::EmptyStmt {} | Syntax::FunctionDecl { .. } | Syntax::ClassDecl { .. } => {}
         _ => {
           out.extend_from_slice(b";");
@@ -320,17 +321,17 @@ For `do <stmt> while (...)` and `if <stmt> else (...)`, when does a semicolon ne
 
 fn emit_js_under_operator<'a>(
   out: &mut Vec<u8>,
-  node: Node<'a>,
+  node: &NodeData<'a>,
   parent_operator_precedence: Option<u8>,
 ) -> () {
-  match &*node.stx() {
+  match &node.stx {
     Syntax::EmptyStmt {} => {}
     Syntax::LiteralBigIntExpr { .. }
     | Syntax::LiteralBooleanExpr { .. }
     | Syntax::LiteralNumberExpr { .. }
     | Syntax::LiteralRegexExpr { .. }
     | Syntax::LiteralStringExpr { .. } => {
-      out.extend_from_slice(node.loc().as_slice());
+      out.extend_from_slice(node.loc.as_slice());
     }
     Syntax::LiteralTemplateExpr { parts } => {
       out.extend_from_slice(b"`");
@@ -430,7 +431,7 @@ fn emit_js_under_operator<'a>(
       extends,
       members,
     } => {
-      emit_class(out, *name, *extends, members);
+      emit_class(out, name, extends, members);
     }
     Syntax::FunctionDecl {
       is_async,
@@ -484,11 +485,10 @@ fn emit_js_under_operator<'a>(
       if *is_async {
         out.extend_from_slice(b"async");
       }
-      let can_omit_parentheses = if let Syntax::FunctionSignature { parameters } = &*signature.stx()
-      {
+      let can_omit_parentheses = if let Syntax::FunctionSignature { parameters } = &signature.stx {
         !is_async
           && parameters.len() == 1
-          && match &*parameters[0].stx() {
+          && match &parameters[0].stx {
             Syntax::ParamDecl {
               default_value,
               pattern,
@@ -496,7 +496,7 @@ fn emit_js_under_operator<'a>(
             } => {
               !rest
                 && default_value.is_none()
-                && match &*pattern.stx() {
+                && match &pattern.stx {
                   Syntax::IdentifierPattern { .. } => true,
                   _ => false,
                 }
@@ -514,7 +514,7 @@ fn emit_js_under_operator<'a>(
         out.extend_from_slice(b")");
       };
       out.extend_from_slice(b"=>");
-      let must_parenthesise_body = match &*body.stx() {
+      let must_parenthesise_body = match &body.stx {
         Syntax::LiteralObjectExpr { .. } => true,
         Syntax::BinaryExpr { operator, .. } if *operator == OperatorName::Comma => true,
         _ => false,
@@ -859,7 +859,7 @@ fn emit_js_under_operator<'a>(
       declaration,
       default,
     } => {
-      match &*declaration.stx() {
+      match &declaration.stx {
         Syntax::ClassDecl { name, .. } | Syntax::FunctionDecl { name, .. } if name.is_none() => {
           debug_assert!(default);
           out.extend_from_slice(b"export default ");
@@ -895,7 +895,7 @@ fn emit_js_under_operator<'a>(
           out.extend_from_slice(b";");
         };
         out.extend_from_slice(b"else");
-        if let Syntax::BlockStmt { .. } = &*alternate.stx() {
+        if let Syntax::BlockStmt { .. } = &alternate.stx {
           // Do nothing.
         } else {
           out.extend_from_slice(b" ");
@@ -999,7 +999,7 @@ fn emit_js_under_operator<'a>(
     }
     Syntax::DoWhileStmt { condition, body } => {
       out.extend_from_slice(b"do");
-      if let Syntax::BlockStmt { .. } = &*body.stx() {
+      if let Syntax::BlockStmt { .. } = &body.stx {
         // Do nothing.
       } else {
         out.extend_from_slice(b" ");
@@ -1130,7 +1130,7 @@ fn emit_js_under_operator<'a>(
       if *parenthesised {
         out.extend_from_slice(b"(");
       }
-      emit_class(out, *name, *extends, members);
+      emit_class(out, name, extends, members);
       // TODO Omit parentheses if possible.
       if *parenthesised {
         out.extend_from_slice(b")");
@@ -1150,5 +1150,6 @@ fn emit_js_under_operator<'a>(
     Syntax::SuperExpr {} => {
       out.extend_from_slice(b"super");
     }
+    Syntax::_TakenNode {} => unreachable!(),
   };
 }
