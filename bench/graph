@@ -19,7 +19,7 @@ set format y "%g%%"
 
 set style fill solid
 set boxwidth 0.5 relative
-set yrange [0:100]
+set yrange [0:*]
 
 set linetype 1 lc rgb "#bcbcbc"
 set linetype 2 lc rgb "#2e61bd"
