@@ -155,6 +155,46 @@ impl<'a> MinifyScope<'a> {
   }
 }
 
+struct Ctx<'a, 'b> {
+  session: &'a Session,
+  symbols: &'b mut SessionHashMap<'a, Symbol<'a>, MinifySymbol<'a>>,
+  scopes: &'b mut SessionHashMap<'a, Scope<'a>, MinifyScope<'a>>,
+}
+
+impl<'a, 'b> Ctx<'a, 'b> {
+  // See [notes/Name minification.md] for the algorithm in more detail.
+  fn track_variable_usage(&mut self, scope: Scope<'a>, name: Identifier<'a>) {
+    let mut cur = Some(scope);
+    while let Some(scope) = cur {
+      if let Some(sym) = scope.get_symbol(name) {
+        self.symbols.entry(sym).or_default().has_usage = true;
+        break;
+      };
+      self
+        .scopes
+        .entry(scope)
+        .or_insert_with(|| MinifyScope::new(self.session))
+        .inherited_vars
+        .insert(name);
+      cur = scope.parent();
+    }
+  }
+
+  fn track_constant_usage(&mut self, scope: Scope<'a>, constant: Constant<'a>) {
+    if let Some(ancestor_scope) = scope.find_furthest_self_or_ancestor(|t| t.is_closure_or_block())
+    {
+      self
+        .scopes
+        .entry(ancestor_scope)
+        .or_insert_with(|| MinifyScope::new(self.session))
+        .constant_usages
+        .entry(constant)
+        .or_default()
+        .count += 1;
+    }
+  }
+}
+
 // This should be run after `PretransformPass` visitor has run and before the `MinifyPass` visitor runs.
 // The IdentifierPass pass collects all usages of variables to determine inherited variables for each scope, so we can know what minified names can be safely used (see `MinifiedNameGenerator`). This function will then go through each declaration in each scope and generate and update their corresponding `MinifySymbol.minified_name`.
 // Some pecularities to note: globals aren't minified (whether declared or not), so when blacklisting minified names, they are directly disallowed. However, all other variables will be minified, so we need to blacklist their minified name, not their original name. This is why this function processes scopes top-down (from the root), as we need to know the minified names of ancestor variables first before we can blacklist them.
@@ -239,43 +279,7 @@ fn get_builtin<'a>(
 // - Find uses of `<var>.prototype` and set `has_prototype`.
 // - Count uses of constants. If there's more than one, create a new shared variable for it.
 struct IdentifierPass<'a, 'b> {
-  session: &'a Session,
-  symbols: &'b mut SessionHashMap<'a, Symbol<'a>, MinifySymbol<'a>>,
-  scopes: &'b mut SessionHashMap<'a, Scope<'a>, MinifyScope<'a>>,
-}
-
-impl<'a, 'b> IdentifierPass<'a, 'b> {
-  // See [notes/Name minification.md] for the algorithm in more detail.
-  fn process_variable_usage(&mut self, scope: Scope<'a>, name: Identifier<'a>) {
-    let mut cur = Some(scope);
-    while let Some(scope) = cur {
-      if let Some(sym) = scope.get_symbol(name) {
-        self.symbols.entry(sym).or_default().has_usage = true;
-        break;
-      };
-      self
-        .scopes
-        .entry(scope)
-        .or_insert_with(|| MinifyScope::new(self.session))
-        .inherited_vars
-        .insert(name);
-      cur = scope.parent();
-    }
-  }
-
-  fn process_constant_usage(&mut self, scope: Scope<'a>, constant: Constant<'a>) {
-    if let Some(ancestor_scope) = scope.find_furthest_self_or_ancestor(|t| t.is_closure_or_block())
-    {
-      self
-        .scopes
-        .entry(ancestor_scope)
-        .or_insert_with(|| MinifyScope::new(self.session))
-        .constant_usages
-        .entry(constant)
-        .or_default()
-        .count += 1;
-    }
-  }
+  ctx: Ctx<'a, 'b>,
 }
 
 impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
@@ -283,21 +287,25 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
     let scope = n.scope;
     match &n.stx {
       Syntax::LiteralNumberExpr { value } => {
-        self.process_constant_usage(scope, Constant::Number(*value));
+        self
+          .ctx
+          .track_constant_usage(scope, Constant::Number(*value));
       }
       Syntax::LiteralStringExpr { value } => {
         // We must clone the string. Consider that it's owned, so a mutator of Syntax can technically mutate it, even though we'd never do such a thing. We can change this by instead making the parser use a immutable value, which could be as simple as a non-mutable reference.
-        self.process_constant_usage(scope, Constant::String(value.clone()));
+        self
+          .ctx
+          .track_constant_usage(scope, Constant::String(value.clone()));
       }
       Syntax::LiteralNull {} => {
-        self.process_constant_usage(scope, Constant::Null);
+        self.ctx.track_constant_usage(scope, Constant::Null);
       }
       Syntax::IdentifierExpr { name } => {
         // TODO Don't do this if operator to `typeof`.
         if let Some(builtin) = get_builtin(scope, *name, None, None) {
-          self.process_constant_usage(scope, builtin)
+          self.ctx.track_constant_usage(scope, builtin)
         };
-        self.process_variable_usage(scope, *name);
+        self.ctx.track_variable_usage(scope, *name);
       }
       // Matches `p1.p2.p3` but not if it's an assignment target.
       Syntax::MemberExpr {
@@ -322,7 +330,7 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
         ..
       } => {
         if let Some(builtin) = get_builtin(scope, *p1, Some(*p2), Some(*p3)) {
-          self.process_constant_usage(scope, builtin)
+          self.ctx.track_constant_usage(scope, builtin)
         };
       }
       // Matches `p1.p2`.
@@ -338,12 +346,12 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
       } => {
         if !assignment_target {
           if let Some(builtin) = get_builtin(scope, *p1, Some(*p2), None) {
-            self.process_constant_usage(scope, builtin)
+            self.ctx.track_constant_usage(scope, builtin)
           };
         };
         if p2.as_slice() == b"prototype" {
           if let Some(sym) = scope.find_symbol(*p1) {
-            self.symbols.entry(sym).or_default().has_prototype = true;
+            self.ctx.symbols.entry(sym).or_default().has_prototype = true;
           };
         }
       }
@@ -364,12 +372,17 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
         };
         if let Some(var_name) = var_name {
           if let Some(sym) = scope.find_symbol(var_name) {
-            self.symbols.entry(sym).or_default().is_used_as_constructor = true;
+            self
+              .ctx
+              .symbols
+              .entry(sym)
+              .or_default()
+              .is_used_as_constructor = true;
           };
         };
       }
       Syntax::JsxMember { base: name, .. } => {
-        self.process_variable_usage(scope, *name);
+        self.ctx.track_variable_usage(scope, *name);
       }
       Syntax::JsxName {
         name,
@@ -377,16 +390,17 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
       } if !name.as_slice()[0].is_ascii_lowercase() => {
         if let Some(sym) = n.scope.find_symbol(*name) {
           self
+            .ctx
             .symbols
             .entry(sym)
             .or_default()
             .is_used_as_jsx_component = true;
         };
-        self.process_variable_usage(scope, *name);
+        self.ctx.track_variable_usage(scope, *name);
       }
       // IdentifierPattern also appears in destructuring, not just declarations. It's safe either way; if it's a declaration, its scope will have its declaration, so there will be no inheritance.
       Syntax::IdentifierPattern { name } => {
-        self.process_variable_usage(scope, *name);
+        self.ctx.track_variable_usage(scope, *name);
       }
       // Same rationale as IdentifierPattern. Note that ClassOrObjectMemberKey::Direct doesn't use an IdentifierPattern, so we must visit it explicitly.
       Syntax::ObjectPatternProperty {
@@ -395,12 +409,12 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
         ..
       } => {
         // TODO What if `name` is a keyword, number, string, etc.?
-        self.process_variable_usage(scope, *name);
+        self.ctx.track_variable_usage(scope, *name);
       }
       Syntax::ObjectMember {
         typ: ObjectMemberType::Shorthand { name },
       } => {
-        self.process_variable_usage(scope, *name);
+        self.ctx.track_variable_usage(scope, *name);
       }
       _ => {}
     }
@@ -409,8 +423,7 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
 
 // The second pass.
 struct PretransformPass<'a, 'b> {
-  session: &'a Session,
-  scopes: &'b mut SessionHashMap<'a, Scope<'a>, MinifyScope<'a>>,
+  ctx: Ctx<'a, 'b>,
 }
 
 impl<'a, 'b> PretransformPass<'a, 'b> {
@@ -423,9 +436,10 @@ impl<'a, 'b> PretransformPass<'a, 'b> {
       return None;
     };
     let usage = self
+      .ctx
       .scopes
       .entry(ancestor_scope)
-      .or_insert_with(|| MinifyScope::new(self.session))
+      .or_insert_with(|| MinifyScope::new(self.ctx.session))
       .constant_usages
       .entry(constant.clone())
       .or_default();
@@ -433,10 +447,10 @@ impl<'a, 'b> PretransformPass<'a, 'b> {
       return None;
     };
     if usage.replacement_var_name.is_none() {
-      let mut name = self.session.new_string();
+      let mut name = self.ctx.session.new_string();
       name.push_str("__MINIFY_JS_CONST_REPLACEMENT_VAR_");
 
-      let mut repr = self.session.new_string();
+      let mut repr = self.ctx.session.new_string();
       match constant {
         Constant::Number(n) => {
           write!(repr, "Number{}", n)
@@ -458,6 +472,7 @@ impl<'a, 'b> PretransformPass<'a, 'b> {
 
       let name = SourceRange::from_slice(
         self
+          .ctx
           .session
           .get_allocator()
           .alloc_slice_copy(name.as_bytes()),
@@ -539,8 +554,9 @@ impl<'a, 'b> Visitor<'a> for PretransformPass<'a, 'b> {
       _ => None,
     };
     if let Some(new_name) = new_name {
-      n.replace(self.session, Syntax::IdentifierExpr { name: new_name });
-      // TODO We probably don't need to call process_variable_usage due to unlikelihood of name minification conflict with generated name, but we should consider doing so anyway in case we have other uses for inherited variables data in the future.
+      n.replace(self.ctx.session, Syntax::IdentifierExpr { name: new_name });
+      // We need to call `process_variable_usage` because even if generated name is unlikely to conflict, minified name might.
+      self.ctx.track_variable_usage(scope, new_name);
     };
   }
 
@@ -563,11 +579,12 @@ impl<'a, 'b> Visitor<'a> for PretransformPass<'a, 'b> {
         .find_self_or_ancestor(|t| t.is_closure_or_global())
         .unwrap();
       self
+        .ctx
         .scopes
         .entry(decl_scope)
-        .or_insert_with(|| MinifyScope::new(self.session))
+        .or_insert_with(|| MinifyScope::new(self.ctx.session))
         .hoisted_functions
-        .insert(name, n.replace(self.session, Syntax::EmptyStmt {}));
+        .insert(name, n.replace(self.ctx.session, Syntax::EmptyStmt {}));
       return;
     };
   }
@@ -646,10 +663,17 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
         if scope.typ().is_closure_or_block() {
           if let Some(min_scope) = self.scopes.get(&scope) {
             let new_loc = loc.at_start();
-            let mut new_decls = self.session.new_vec::<VariableDeclarator>();
+            // Declarations are ordered for builtin aliases e.g. the alias for `Array` must come before `Array.from`.
+            let mut new_decls = self.session.new_vec();
             for (con, con_usg) in min_scope.constant_usages.iter() {
               // This is only Some if we've made replacements (i.e. count > 1).
               if let Some(new_name) = con_usg.replacement_var_name {
+                let ordinal = match con {
+                  Constant::Number(_) | Constant::String(_) | Constant::Null => {
+                    (b"".as_slice(), b"".as_slice(), b"".as_slice())
+                  }
+                  Constant::Builtin(b) => (b.0, b.1, b.2),
+                };
                 let init = new_node(self.session, scope, new_loc, match con {
                   Constant::Number(n) => Syntax::LiteralNumberExpr { value: *n },
                   Constant::String(v) => Syntax::LiteralStringExpr { value: v.clone() },
@@ -673,19 +697,24 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
                     expr
                   }
                 });
-                new_decls.push(VariableDeclarator {
+                new_decls.push((ordinal, VariableDeclarator {
                   pattern: new_node(self.session, scope, new_loc, Syntax::IdentifierPattern {
                     name: new_name,
                   }),
                   initializer: Some(init),
-                });
+                }));
               };
             }
             if !new_decls.is_empty() {
+              new_decls.sort_unstable_by_key(|(ord, _)| *ord);
+              let mut new_decls_sorted = self.session.new_vec();
+              for (_, decl) in new_decls.into_iter() {
+                new_decls_sorted.push(decl);
+              }
               let decl = new_node(self.session, scope, new_loc, Syntax::VarDecl {
                 export: false,
                 mode: VarDeclMode::Let,
-                declarators: new_decls,
+                declarators: new_decls_sorted,
               });
               body.insert(
                 0,
@@ -975,15 +1004,20 @@ pub fn minify_js<'a>(session: &'a Session, top_level_node: &mut NodeData<'a>) ->
   let mut export_bindings = Vec::new();
 
   IdentifierPass {
-    scopes: &mut scopes,
-    session,
-    symbols: &mut symbols,
+    ctx: Ctx {
+      scopes: &mut scopes,
+      session,
+      symbols: &mut symbols,
+    },
   }
   .visit(top_level_node);
 
   PretransformPass {
-    scopes: &mut scopes,
-    session,
+    ctx: Ctx {
+      scopes: &mut scopes,
+      session,
+      symbols: &mut symbols,
+    },
   }
   .visit(top_level_node);
 
