@@ -356,9 +356,9 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
       }
       Syntax::UnaryExpr {
         parenthesised,
-        operator,
+        operator: OperatorName::New,
         argument,
-      } if *operator == OperatorName::New => {
+      } => {
         let var_name = match &argument.stx {
           // e.g. `new Array()`.
           Syntax::CallExpr { callee, .. } => match &callee.stx {
@@ -566,10 +566,10 @@ impl<'a, 'b> Visitor<'a> for PretransformPass<'a, 'b> {
     // TODO Consider `export` and `export default`.
     let named_fn_decl_name = match &n.stx {
       Syntax::FunctionDecl {
-        export,
+        export: false,
         name: Some(name),
         ..
-      } if !*export => Some(name.loc),
+      } => Some(name.loc),
       _ => None,
     };
     if let Some(name) = named_fn_decl_name {
@@ -748,8 +748,8 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
       Syntax::FunctionExpr {
         parenthesised,
         is_async,
-        generator,
-        name,
+        generator: false,
+        name: None,
         signature,
         body,
       } => {
@@ -759,11 +759,7 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
         // TODO Can this work sometimes even when `arguments` is used?
         // TODO This is still not risk-free, as the function's prototype could still be used even if there is no `this`.
         // TODO Detect `function(){}.bind(this)`, which is pretty much risk free unless somehow Function.prototype.bind has been overridden. However, any other value for the first argument of `.bind` means that it is no longer safe.
-        if name.is_none()
-          && !*generator
-          && !fn_scope.has_flag(ScopeFlag::UsesArguments)
-          && !fn_scope.has_flag(ScopeFlag::UsesThis)
-        {
+        if !fn_scope.has_any_of_flags(ScopeFlag::UsesArguments | ScopeFlag::UsesThis) {
           new_stx = Some(Syntax::ArrowFunctionExpr {
             // TODO
             parenthesised: true,
@@ -774,37 +770,31 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
         };
       }
       Syntax::FunctionDecl {
-        export,
+        export: false,
         body,
-        generator,
+        generator: false,
         is_async,
-        name,
+        name: Some(name),
         signature,
         ..
-      } if !*export => {
+      } => {
         let fn_scope = body.scope;
         // TODO Consider `export function` and `export default function`.
         // TODO Detect property access of "prototype" on variable referencing function to reduce (but not remove) false negatives.
         // TODO Can this work sometimes even when `arguments` is used?
         // TODO This is still not risk-free, as the function's prototype could still be used even if there is no `this`.
         // TODO Detect `function(){}.bind(this)`, which is pretty much risk free unless somehow Function.prototype.bind has been overridden. However, any other value for the first argument of `.bind` means that it is no longer safe.
-        if !*export
-          && name.is_some()
-          && !*generator
-          && !fn_scope.has_flag(ScopeFlag::UsesArguments)
-          && !fn_scope.has_flag(ScopeFlag::UsesThis)
+        if !fn_scope.has_any_of_flags(ScopeFlag::UsesArguments | ScopeFlag::UsesThis)
           // Use `find_symbol` as we might not be in a closure scope and the function declaration's symbol would've been added to an ancestor.
           // If no symbol is found (e.g. global), or it exists but is not `is_used_as_constructor` and not `has_prototype`, then we can safely proceed.
-          && scope.find_symbol(name.as_ref().unwrap().loc).and_then(|sym| self.symbols.get(&sym)).filter(|sym| sym.is_used_as_constructor || sym.has_prototype).is_none()
+          && scope.find_symbol(name.loc).and_then(|sym| self.symbols.get(&sym)).filter(|sym| sym.is_used_as_constructor || sym.has_prototype).is_none()
         {
           let var_decl_pat = new_node(
             self.session,
             // TODO Is this scope correct?
             scope,
-            name.as_ref().unwrap().loc,
-            Syntax::IdentifierPattern {
-              name: name.as_ref().unwrap().loc,
-            },
+            name.loc,
+            Syntax::IdentifierPattern { name: name.loc },
           );
           let var_decl_init = new_node(
             self.session,
@@ -887,17 +877,17 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
         };
       }
       Syntax::ClassDecl {
-        export,
+        export: true,
         export_default,
         name,
         ..
       }
       | Syntax::FunctionDecl {
-        export,
+        export: true,
         export_default,
         name,
         ..
-      } if *export => {
+      } => {
         if let Some(name) = name {
           match &name.stx {
             Syntax::ClassOrFunctionName { name } => {
@@ -915,10 +905,10 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
         }
       }
       Syntax::VarDecl {
-        export,
+        export: true,
         declarators,
         ..
-      } if *export => {
+      } => {
         for decl in declarators.iter_mut() {
           self.visit_exported_pattern(decl.pattern);
         }
@@ -930,7 +920,7 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
             ExportNames::Specific(names) => {
               for e in names {
                 self.export_bindings.push(ExportBinding {
-                  target: e.target.clone(),
+                  target: e.target,
                   alias: match &e.alias.stx {
                     Syntax::IdentifierPattern { name } => *name,
                     _ => unreachable!(),
