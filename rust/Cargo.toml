@@ -14,7 +14,7 @@ version = "0.5.4"
 
 [dependencies]
 lazy_static = "1.4"
-parse-js = "0.16"
+parse-js = "0.17"
 
 [features]
 serialize = ["parse-js/serialize"]

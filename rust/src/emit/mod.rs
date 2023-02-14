@@ -377,7 +377,15 @@ fn emit_js_under_operator<'a>(
     }
     Syntax::LiteralStringExpr { value } => {
       // TODO Possibly invalid.
-      write!(out, "`{}`", value.replace("\\", "\\\\").replace("`", "\\`")).unwrap();
+      write!(
+        out,
+        "`{}`",
+        value
+          .replace("\\", "\\\\")
+          .replace("`", "\\`")
+          .replace("$", "\\$")
+      )
+      .unwrap();
     }
     Syntax::LiteralTemplateExpr { parts } => {
       out.extend_from_slice(b"`");
