@@ -9,22 +9,42 @@ use parse_js::ast::ObjectMemberType;
 use parse_js::ast::Syntax;
 use parse_js::ast::VarDeclMode;
 use parse_js::ast::VariableDeclarator;
+use parse_js::builtin::Builtin;
+use parse_js::builtin::BUILTINS;
 use parse_js::char::ID_CONTINUE_CHARSTR;
 use parse_js::char::ID_START_CHARSTR;
 use parse_js::lex::KEYWORD_STRS;
+use parse_js::num::JsNumber;
 use parse_js::operator::OperatorName;
 use parse_js::session::Session;
 use parse_js::session::SessionHashMap;
 use parse_js::session::SessionHashSet;
+use parse_js::session::SessionString;
 use parse_js::session::SessionVec;
 use parse_js::source::SourceRange;
 use parse_js::symbol::Identifier;
 use parse_js::symbol::Scope;
 use parse_js::symbol::ScopeFlag;
-use parse_js::symbol::ScopeType;
 use parse_js::symbol::Symbol;
 use parse_js::visit::JourneyControls;
 use parse_js::visit::Visitor;
+use std::fmt::Write;
+
+// We don't minify booleans, as `!0` and `!1` are good enough,and in a sufficiently large codebase minified variable names will have lengths >= 2 anyway.
+// TODO BigInt.
+#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+enum Constant<'a> {
+  Number(JsNumber),
+  String(SessionString<'a>),
+  Null,
+  Builtin(Builtin<'static>),
+}
+
+#[derive(Default)]
+struct ConstantUsage<'a> {
+  count: usize,
+  replacement_var_name: Option<SourceRange<'a>>,
+}
 
 struct ExportBinding<'a> {
   target: SourceRange<'a>,
@@ -122,6 +142,7 @@ struct MinifyScope<'a> {
   // Function declarations within this closure-like scope that must be hoisted to declarations at the very beginning of this closure's code (so we can transform them to `var` and still have them work correctly). There may be multiple closures with the same name, nested deep with many blocks and branches, which is why we use a map; the last visited (lexical) declaration wins. Note that this is only populated if this scope is a closure; function declarations don't hoist to blocks.
   // Since they could be deep and anywhere, we must take them and move them into this map; we can't just look at a BlockStmt's children as they may not always be there.
   hoisted_functions: SessionHashMap<'a, Identifier<'a>, Node<'a>>,
+  constant_usages: SessionHashMap<'a, Constant<'a>, ConstantUsage<'a>>,
 }
 
 impl<'a> MinifyScope<'a> {
@@ -129,12 +150,13 @@ impl<'a> MinifyScope<'a> {
     MinifyScope {
       inherited_vars: session.new_hashset(),
       hoisted_functions: session.new_hashmap(),
+      constant_usages: session.new_hashmap(),
     }
   }
 }
 
-// This should be run after the first `IdentifierPass` visitor has run and before the `MinifyPass` visitor runs.
-// The first pass collects all usages of variables to determine inherited variables for each scope, so we can know what minified names can be safely used (see `MinifiedNameGenerator`). This function will then go through each declaration in each scope and generate and update their corresponding `MinifySymbol.minified_name`.
+// This should be run after `PretransformPass` visitor has run and before the `MinifyPass` visitor runs.
+// The IdentifierPass pass collects all usages of variables to determine inherited variables for each scope, so we can know what minified names can be safely used (see `MinifiedNameGenerator`). This function will then go through each declaration in each scope and generate and update their corresponding `MinifySymbol.minified_name`.
 // Some pecularities to note: globals aren't minified (whether declared or not), so when blacklisting minified names, they are directly disallowed. However, all other variables will be minified, so we need to blacklist their minified name, not their original name. This is why this function processes scopes top-down (from the root), as we need to know the minified names of ancestor variables first before we can blacklist them.
 fn minify_names<'a>(
   session: &'a Session,
@@ -195,11 +217,27 @@ fn minify_names<'a>(
   }
 }
 
-// The first pass of the minifier. It does a few things:
+fn get_builtin<'a>(
+  scope: Scope<'a>,
+  p1: SourceRange<'a>,
+  p2: Option<SourceRange<'a>>,
+  p3: Option<SourceRange<'a>>,
+) -> Option<Constant<'a>> {
+  debug_assert!(!p1.is_empty());
+  if scope.find_symbol(p1).is_some() {
+    return None;
+  };
+  let Some(builtin) = BUILTINS.get(&Builtin(p1.as_slice(), p2.as_ref().map(|r| r.as_slice()).unwrap_or(b""), p3.as_ref().map(|r| r.as_slice()).unwrap_or(b""))) else {
+    return None;
+  };
+  Some(Constant::Builtin(builtin.get()))
+}
+
 // - Detect all usages of JSX components, as React determines `<link>` to be the HTML tag and `<Link>` to be the variable `Link` as a component, so we cannot minify `Link` to `link` or `a0` or `bb` (i.e. make capitalised JSX elements uncapitalised).
 // - Find all references of variables so we can determine inherited variables (see `MinifiedNameGenerator` and `MinifyScope`). This is because JS allows variables to be lexically references before they're used, so we cannot do this in the same pass. For example, `let b = 1; { let a = () => b; let b = 2; }`.
-// - Move function declarations into `hoisted_functions`, so we can then place them back in the tree at the top of a closure in the second pass.
-// - Find uses of `new <var>` where `var` points to a function declaration and if so, set `is_used_as_constructor_function`.
+// - Find uses of `new <var>` and set `is_used_as_constructor`.
+// - Find uses of `<var>.prototype` and set `has_prototype`.
+// - Count uses of constants. If there's more than one, create a new shared variable for it.
 struct IdentifierPass<'a, 'b> {
   session: &'a Session,
   symbols: &'b mut SessionHashMap<'a, Symbol<'a>, MinifySymbol<'a>>,
@@ -224,15 +262,87 @@ impl<'a, 'b> IdentifierPass<'a, 'b> {
       cur = scope.parent();
     }
   }
+
+  fn process_constant_usage(&mut self, scope: Scope<'a>, constant: Constant<'a>) {
+    if let Some(ancestor_scope) = scope.find_furthest_self_or_ancestor(|t| t.is_closure_or_block())
+    {
+      self
+        .scopes
+        .entry(ancestor_scope)
+        .or_insert_with(|| MinifyScope::new(self.session))
+        .constant_usages
+        .entry(constant)
+        .or_default()
+        .count += 1;
+    }
+  }
 }
 
 impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
   fn on_syntax_down(&mut self, n: &mut NodeData<'a>, _ctl: &mut JourneyControls) -> () {
     let scope = n.scope;
     match &n.stx {
-      Syntax::MemberExpr { left, right, .. } if right.as_str() == "prototype" => {
-        if let Syntax::IdentifierExpr { name } = &left.stx {
-          if let Some(sym) = scope.find_symbol(*name) {
+      Syntax::LiteralNumberExpr { value } => {
+        self.process_constant_usage(scope, Constant::Number(*value));
+      }
+      Syntax::LiteralStringExpr { value } => {
+        // We must clone the string. Consider that it's owned, so a mutator of Syntax can technically mutate it, even though we'd never do such a thing. We can change this by instead making the parser use a immutable value, which could be as simple as a non-mutable reference.
+        self.process_constant_usage(scope, Constant::String(value.clone()));
+      }
+      Syntax::LiteralNull {} => {
+        self.process_constant_usage(scope, Constant::Null);
+      }
+      Syntax::IdentifierExpr { name } => {
+        // TODO Don't do this if operator to `typeof`.
+        if let Some(builtin) = get_builtin(scope, *name, None, None) {
+          self.process_constant_usage(scope, builtin)
+        };
+        self.process_variable_usage(scope, *name);
+      }
+      // Matches `p1.p2.p3` but not if it's an assignment target.
+      Syntax::MemberExpr {
+        assignment_target: false,
+        right: p3,
+        optional_chaining: false,
+        left:
+          NodeData {
+            stx:
+              Syntax::MemberExpr {
+                right: p2,
+                optional_chaining: false,
+                left:
+                  NodeData {
+                    stx: Syntax::IdentifierExpr { name: p1 },
+                    ..
+                  },
+                ..
+              },
+            ..
+          },
+        ..
+      } => {
+        if let Some(builtin) = get_builtin(scope, *p1, Some(*p2), Some(*p3)) {
+          self.process_constant_usage(scope, builtin)
+        };
+      }
+      // Matches `p1.p2`.
+      Syntax::MemberExpr {
+        assignment_target,
+        right: p2,
+        optional_chaining: false,
+        left: NodeData {
+          stx: Syntax::IdentifierExpr { name: p1 },
+          ..
+        },
+        ..
+      } => {
+        if !assignment_target {
+          if let Some(builtin) = get_builtin(scope, *p1, Some(*p2), None) {
+            self.process_constant_usage(scope, builtin)
+          };
+        };
+        if p2.as_slice() == b"prototype" {
+          if let Some(sym) = scope.find_symbol(*p1) {
             self.symbols.entry(sym).or_default().has_prototype = true;
           };
         }
@@ -279,25 +389,159 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
         self.process_variable_usage(scope, *name);
       }
       // Same rationale as IdentifierPattern. Note that ClassOrObjectMemberKey::Direct doesn't use an IdentifierPattern, so we must visit it explicitly.
-      Syntax::ObjectPatternProperty { key, .. } => {
-        if let ClassOrObjectMemberKey::Direct(name) = key {
-          // TODO What if name is a keyword, number, string, etc.?
-          self.process_variable_usage(scope, *name);
-        }
-      }
-      Syntax::IdentifierExpr { name } => {
+      Syntax::ObjectPatternProperty {
+        key: ClassOrObjectMemberKey::Direct(name),
+        target: None,
+        ..
+      } => {
+        // TODO What if `name` is a keyword, number, string, etc.?
         self.process_variable_usage(scope, *name);
       }
-      Syntax::ObjectMember { typ } => {
-        match typ {
-          ObjectMemberType::Shorthand { name } => {
-            self.process_variable_usage(scope, *name);
-          }
-          _ => {}
-        };
+      Syntax::ObjectMember {
+        typ: ObjectMemberType::Shorthand { name },
+      } => {
+        self.process_variable_usage(scope, *name);
       }
       _ => {}
     }
+  }
+}
+
+// The second pass.
+struct PretransformPass<'a, 'b> {
+  session: &'a Session,
+  scopes: &'b mut SessionHashMap<'a, Scope<'a>, MinifyScope<'a>>,
+}
+
+impl<'a, 'b> PretransformPass<'a, 'b> {
+  fn maybe_replace_constant_usage(
+    &mut self,
+    scope: Scope<'a>,
+    constant: Constant<'a>,
+  ) -> Option<SourceRange<'a>> {
+    let Some(ancestor_scope) = scope.find_furthest_self_or_ancestor(|t| t.is_closure_or_block()) else {
+      return None;
+    };
+    let usage = self
+      .scopes
+      .entry(ancestor_scope)
+      .or_insert_with(|| MinifyScope::new(self.session))
+      .constant_usages
+      .entry(constant.clone())
+      .or_default();
+    if usage.count <= 1 {
+      return None;
+    };
+    if usage.replacement_var_name.is_none() {
+      let mut name = self.session.new_string();
+      name.push_str("__MINIFY_JS_CONST_REPLACEMENT_VAR_");
+
+      let mut repr = self.session.new_string();
+      match constant {
+        Constant::Number(n) => {
+          write!(repr, "Number{}", n)
+        }
+        Constant::String(s) => {
+          write!(repr, "String{}", s)
+        }
+        Constant::Null => {
+          write!(repr, "Null")
+        }
+        Constant::Builtin(b) => {
+          write!(repr, "Builtin{}", b)
+        }
+      }
+      .unwrap();
+      for byte in repr.as_bytes() {
+        write!(name, "{:X}", byte).unwrap();
+      }
+
+      let name = SourceRange::from_slice(
+        self
+          .session
+          .get_allocator()
+          .alloc_slice_copy(name.as_bytes()),
+      );
+      usage.replacement_var_name = Some(name);
+      ancestor_scope.add_symbol(name).unwrap();
+    };
+    usage.replacement_var_name
+  }
+}
+
+// - Replace all shared constant usages to reference the newly-created shared variable instead.
+// - Move function declarations into `hoisted_functions`, so we can then place them back in the tree at the top of a closure in the next pass.
+impl<'a, 'b> Visitor<'a> for PretransformPass<'a, 'b> {
+  fn on_syntax_down(&mut self, n: &mut NodeData<'a>, _: &mut JourneyControls) {
+    // We can't do this in the IdentifierPass::on_syntax_up as counts are only valid after going through the entire code, and on_syntax_up only ensures the current subtree has been visited.
+    let scope = n.scope;
+    let new_name = match &n.stx {
+      Syntax::LiteralNumberExpr { value } => {
+        self.maybe_replace_constant_usage(scope, Constant::Number(*value))
+      }
+      Syntax::LiteralStringExpr { value } => {
+        // We must clone the string. Consider that it's owned, so a mutator of Syntax can technically mutate it, even though we'd never do such a thing. We can change this by instead making the parser use a immutable value, which could be as simple as a non-mutable reference.
+        self.maybe_replace_constant_usage(scope, Constant::String(value.clone()))
+      }
+      Syntax::LiteralNull {} => self.maybe_replace_constant_usage(scope, Constant::Null),
+      Syntax::IdentifierExpr { name } => {
+        if let Some(builtin) = get_builtin(scope, *name, None, None) {
+          self.maybe_replace_constant_usage(scope, builtin)
+        } else {
+          None
+        }
+      }
+      // Matches `p1.p2.p3` but not if it's an assignment target.
+      Syntax::MemberExpr {
+        assignment_target: false,
+        right: p3,
+        optional_chaining: false,
+        left:
+          NodeData {
+            stx:
+              Syntax::MemberExpr {
+                right: p2,
+                optional_chaining: false,
+                left:
+                  NodeData {
+                    stx: Syntax::IdentifierExpr { name: p1 },
+                    ..
+                  },
+                ..
+              },
+            ..
+          },
+        ..
+      } => {
+        if let Some(builtin) = get_builtin(scope, *p1, Some(*p2), Some(*p3)) {
+          self.maybe_replace_constant_usage(scope, builtin)
+        } else {
+          None
+        }
+      }
+      // Matches `p1.p2` but not if it's an assignment target.
+      Syntax::MemberExpr {
+        assignment_target: false,
+        right: p2,
+        optional_chaining: false,
+        left: NodeData {
+          stx: Syntax::IdentifierExpr { name: p1 },
+          ..
+        },
+        ..
+      } => {
+        if let Some(builtin) = get_builtin(scope, *p1, Some(*p2), None) {
+          self.maybe_replace_constant_usage(scope, builtin)
+        } else {
+          None
+        }
+      }
+      _ => None,
+    };
+    if let Some(new_name) = new_name {
+      n.replace(self.session, Syntax::IdentifierExpr { name: new_name });
+      // TODO We probably don't need to call process_variable_usage due to unlikelihood of name minification conflict with generated name, but we should consider doing so anyway in case we have other uses for inherited variables data in the future.
+    };
   }
 
   fn on_syntax_up(&mut self, n: &mut NodeData<'a>) -> () {
@@ -329,7 +573,7 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
   }
 }
 
-// The second and main pass, that does most of the work. This should be run after the `minify_names` function.
+// The third and main pass, that does most of the work. This should be run after the `minify_names` function.
 struct MinifyPass<'a, 'b> {
   session: &'a Session,
   // Exports with the same exported name (including multiple default exports) are illegal, so we don't have to worry about/handle that case.
@@ -397,6 +641,60 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
               body.insert(0, fn_decl.take(self.session));
             }
           };
+        };
+        // TODO Are all non-global non-class scopes associated with exactly one BlockStmt or TopLevel?
+        if scope.typ().is_closure_or_block() {
+          if let Some(min_scope) = self.scopes.get(&scope) {
+            let new_loc = loc.at_start();
+            let mut new_decls = self.session.new_vec::<VariableDeclarator>();
+            for (con, con_usg) in min_scope.constant_usages.iter() {
+              // This is only Some if we've made replacements (i.e. count > 1).
+              if let Some(new_name) = con_usg.replacement_var_name {
+                let init = new_node(self.session, scope, new_loc, match con {
+                  Constant::Number(n) => Syntax::LiteralNumberExpr { value: *n },
+                  Constant::String(v) => Syntax::LiteralStringExpr { value: v.clone() },
+                  Constant::Null => Syntax::LiteralNull {},
+                  Constant::Builtin(b) => {
+                    let mut expr = Syntax::IdentifierExpr {
+                      name: SourceRange::from_slice(b.0),
+                    };
+                    for p in &[b.1, b.2] {
+                      if p == b"" {
+                        break;
+                      };
+                      expr = Syntax::MemberExpr {
+                        parenthesised: false,
+                        optional_chaining: false,
+                        assignment_target: false,
+                        left: new_node(self.session, scope, new_loc, expr),
+                        right: SourceRange::from_slice(p),
+                      };
+                    }
+                    expr
+                  }
+                });
+                new_decls.push(VariableDeclarator {
+                  pattern: new_node(self.session, scope, new_loc, Syntax::IdentifierPattern {
+                    name: new_name,
+                  }),
+                  initializer: Some(init),
+                });
+              };
+            }
+            if !new_decls.is_empty() {
+              let decl = new_node(self.session, scope, new_loc, Syntax::VarDecl {
+                export: false,
+                mode: VarDeclMode::Let,
+                declarators: new_decls,
+              });
+              body.insert(
+                0,
+                new_node(self.session, scope, new_loc, Syntax::VarStmt {
+                  declaration: decl,
+                }),
+              );
+            };
+          }
         };
       }
       Syntax::ArrowFunctionExpr {
@@ -621,50 +919,40 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
         }
       }
       Syntax::ObjectPatternProperty {
-        key,
-        target,
+        key: ClassOrObjectMemberKey::Direct(name),
+        target: None,
         default_value,
       } => {
-        match key {
-          ClassOrObjectMemberKey::Direct(name) => {
-            if target.is_none() {
-              if scope.find_symbol(*name).is_some() {
-                // If the symbol declaration exists, we know it definitely has a minified name. However, because the parser recurses into changed subtrees, we must simply expand this property with a IdentifierPattern target referencing the original name, so that the visitor for it will then change it to the minified name. Otherwise, we'll retrieve the minified name for a minified name, which is incorrect. Note that we can't simply skip the subtree entirely as there are still other parts.
-                let replacement_target_node =
-                  new_node(self.session, scope, loc, Syntax::IdentifierPattern {
-                    name: *name,
-                  });
-                new_stx = Some(Syntax::ObjectPatternProperty {
-                  key: key.take(),
-                  target: Some(replacement_target_node),
-                  default_value: default_value.take(),
-                });
-              };
-            }
-          }
-          _ => {}
+        if scope.find_symbol(*name).is_some() {
+          // If the symbol declaration exists, we know it definitely has a minified name. However, because the parser recurses into changed subtrees, we must simply expand this property with a IdentifierPattern target referencing the original name, so that the visitor for it will then change it to the minified name. Otherwise, we'll retrieve the minified name for a minified name, which is incorrect. Note that we can't simply skip the subtree entirely as there are still other parts.
+          let replacement_target_node =
+            new_node(self.session, scope, loc, Syntax::IdentifierPattern {
+              name: *name,
+            });
+          new_stx = Some(Syntax::ObjectPatternProperty {
+            key: ClassOrObjectMemberKey::Direct(*name),
+            target: Some(replacement_target_node),
+            default_value: default_value.take(),
+          });
         };
       }
-      Syntax::ObjectMember { typ } => {
-        match typ {
-          ObjectMemberType::Shorthand { name } => {
-            if scope.find_symbol(*name).is_some() {
-              // See Syntax::ObjectPatternProperty > ClassOrObjectMemberKey::Direct match branch.
-              let replacement_initializer_node =
-                new_node(self.session, scope, loc, Syntax::IdentifierExpr {
-                  name: *name,
-                });
-              new_stx = Some(Syntax::ObjectMember {
-                typ: ObjectMemberType::Valued {
-                  key: ClassOrObjectMemberKey::Direct(*name),
-                  value: ClassOrObjectMemberValue::Property {
-                    initializer: Some(replacement_initializer_node),
-                  },
-                },
-              });
-            };
-          }
-          _ => {}
+      Syntax::ObjectMember {
+        typ: ObjectMemberType::Shorthand { name },
+      } => {
+        if scope.find_symbol(*name).is_some() {
+          // See Syntax::ObjectPatternProperty match branch.
+          let replacement_initializer_node =
+            new_node(self.session, scope, loc, Syntax::IdentifierExpr {
+              name: *name,
+            });
+          new_stx = Some(Syntax::ObjectMember {
+            typ: ObjectMemberType::Valued {
+              key: ClassOrObjectMemberKey::Direct(*name),
+              value: ClassOrObjectMemberValue::Property {
+                initializer: Some(replacement_initializer_node),
+              },
+            },
+          });
         };
       }
       _ => {}
@@ -683,24 +971,31 @@ pub fn minify_js<'a>(session: &'a Session, top_level_node: &mut NodeData<'a>) ->
   let mut symbols = session.new_hashmap::<Symbol<'a>, MinifySymbol>();
   // Our custom data/state associated with a Scope.
   let mut scopes = session.new_hashmap::<Scope<'a>, MinifyScope<'a>>();
+  // Exports: what they refer to and what they're named.
+  let mut export_bindings = Vec::new();
 
-  let mut identifier_pass = IdentifierPass {
+  IdentifierPass {
+    scopes: &mut scopes,
     session,
     symbols: &mut symbols,
+  }
+  .visit(top_level_node);
+
+  PretransformPass {
     scopes: &mut scopes,
-  };
-  identifier_pass.visit(top_level_node);
+    session,
+  }
+  .visit(top_level_node);
 
   minify_names(session, top_level_scope, &mut scopes, &mut symbols);
 
-  let mut export_bindings = Vec::new();
-  let mut minify_pass = MinifyPass {
+  MinifyPass {
     session,
     export_bindings: &mut export_bindings,
     symbols: &mut symbols,
     scopes: &mut scopes,
-  };
-  minify_pass.visit(top_level_node);
+  }
+  .visit(top_level_node);
 
   let mut export_names = session.new_vec();
   for e in export_bindings.iter() {

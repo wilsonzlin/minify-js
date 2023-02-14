@@ -17,6 +17,7 @@ use parse_js::operator::OPERATORS;
 use parse_js::session::SessionString;
 use parse_js::session::SessionVec;
 use std::collections::HashMap;
+use std::io::Write;
 
 #[cfg(test)]
 mod tests;
@@ -356,12 +357,27 @@ fn emit_js_under_operator<'a>(
 ) -> () {
   match &node.stx {
     Syntax::EmptyStmt {} => {}
-    Syntax::LiteralBigIntExpr { .. }
-    | Syntax::LiteralBooleanExpr { .. }
-    | Syntax::LiteralNumberExpr { .. }
-    | Syntax::LiteralRegexExpr { .. }
-    | Syntax::LiteralStringExpr { .. } => {
+    Syntax::LiteralBigIntExpr { .. } => {
+      // TODO This is invalid as `loc` may not be valid (e.g. newly created node during transform).
       out.extend_from_slice(node.loc.as_slice());
+    }
+    Syntax::LiteralRegexExpr { .. } => {
+      // TODO This is invalid as `loc` may not be valid (e.g. newly created node during transform).
+      out.extend_from_slice(node.loc.as_slice());
+    }
+    Syntax::LiteralBooleanExpr { value } => {
+      match *value {
+        true => out.extend_from_slice(b"!0"),
+        false => out.extend_from_slice(b"!1"),
+      };
+    }
+    Syntax::LiteralNumberExpr { value } => {
+      // TODO Possibly invalid.
+      write!(out, "{}", value).unwrap();
+    }
+    Syntax::LiteralStringExpr { value } => {
+      // TODO Possibly invalid.
+      write!(out, "`{}`", value.replace("`", "\\`").replace("\\", "\\\\")).unwrap();
     }
     Syntax::LiteralTemplateExpr { parts } => {
       out.extend_from_slice(b"`");
@@ -820,9 +836,6 @@ fn emit_js_under_operator<'a>(
     Syntax::LiteralNull {} => {
       out.extend_from_slice(b"null");
     }
-    Syntax::LiteralUndefined {} => {
-      out.extend_from_slice(b"undefined");
-    }
     Syntax::UnaryExpr {
       parenthesised,
       operator: operator_name,
@@ -893,6 +906,7 @@ fn emit_js_under_operator<'a>(
       optional_chaining,
       object,
       member,
+      ..
     } => {
       emit_js_under_operator(
         out,
@@ -1130,6 +1144,7 @@ fn emit_js_under_operator<'a>(
       optional_chaining,
       left,
       right,
+      ..
     } => {
       let operator_name = &if *optional_chaining {
         OperatorName::OptionalChainingMemberAccess

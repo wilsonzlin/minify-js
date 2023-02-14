@@ -24,6 +24,7 @@ Comparison with esbuild, run on [common libraries](./bench).
 - Minification of identifiers.
 - Omits semicolons, spaces, parentheses, and braces where possible.
 - Transforms functions to arrow functions when `new`, `this`, `arguments`, and `prototype` aren't used.
+- Moves repeated usages of constants to one shared variable.
 
 ## Usage
 

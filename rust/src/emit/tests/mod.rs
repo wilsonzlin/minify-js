@@ -52,15 +52,16 @@ fn test_emit_global() {
       }()
     "#,
     "\
-      function*gen(){yield*\"hello world!\"}\
+      function*gen(){yield*`hello world!`}\
       !()=>{\
+      let m=1,o=7,n=2;\
       var a=(()=>{a()});\
       com.java.names.long;\
       module.functions;\
-      var b=1,c,{brown:d,_:[e,f,,,...g],...h}=i;\
-      (({the:b}=a,[c]=2)=>{{let b=a(e)}b,c,d,e;return;1.2.toString()})();\
+      var b=m,c,{brown:d,_:[e,f,,,...g],...h}=i;\
+      (({the:b}=a,[c]=n)=>{{let b=a(e)}b,c,d,e;return;1.2.toString()})();\
       const j=({})=>{};\
-      const k=a=>(1,2),l=(1/7)/(2/7)\
+      const k=a=>(m,n),l=(m/o)/(n/o)\
       }()\
     ",
   )
@@ -99,7 +100,7 @@ fn test_emit_module() {
       import{default as f}from\"react-dom\";\
       const g=1;\
       const {meaning:h}={meaning:42},i=10;\
-      console.log(\"meaning\",h);\
+      console.log(`meaning`,h);\
       function j(){}\
       console.log(j(i));\
       f.hello();\
@@ -221,6 +222,6 @@ fn test_emit_jsx() {
 
       render(<CompImp><CompLocal/></CompImp>);
     "#,
-    r#"import A from"./comp";let a={a:"div"};const B=()=><a.a><strong/></a.a>;render(<A><B/></A>)"#,
+    r#"import A from"./comp";let a={a:`div`};const B=()=><a.a><strong/></a.a>;render(<A><B/></A>)"#,
   );
 }
