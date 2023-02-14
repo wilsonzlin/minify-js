@@ -1,3 +1,4 @@
+use aho_corasick::AhoCorasick;
 use lazy_static::lazy_static;
 use parse_js::ast::ArrayElement;
 use parse_js::ast::ClassMember;
@@ -14,7 +15,6 @@ use parse_js::ast::Syntax;
 use parse_js::ast::VarDeclMode;
 use parse_js::operator::OperatorName;
 use parse_js::operator::OPERATORS;
-use parse_js::session::SessionString;
 use parse_js::session::SessionVec;
 use std::collections::HashMap;
 use std::io::Write;
@@ -94,7 +94,15 @@ lazy_static! {
       map.insert(OperatorName::YieldDelegated, "yield*");
       map
   };
+
+  static ref TEMPLATE_LITERAL_ESCAPE_MAT: AhoCorasick = AhoCorasick::new(&[
+    b"\\",
+    b"`",
+    b"$",
+  ]);
 }
+
+const TEMPLATE_LITERAL_ESCAPE_REP: &[&[u8]] = &[b"\\\\", b"\\`", b"\\$"];
 
 // Returns whether or not the value is a property.
 fn emit_class_or_object_member<'a>(
@@ -218,7 +226,7 @@ fn emit_class<'a>(
 fn emit_import_or_export_statement_trailer<'a>(
   out: &mut Vec<u8>,
   names: Option<&ExportNames<'a>>,
-  from: Option<&SessionString<'a>>,
+  from: Option<&'a [u8]>,
 ) -> () {
   match names {
     Some(ExportNames::All(alias)) => {
@@ -249,7 +257,7 @@ fn emit_import_or_export_statement_trailer<'a>(
   if let Some(from) = from {
     out.extend_from_slice(b"from\"");
     // TODO Escape?
-    out.extend_from_slice(from.as_bytes());
+    out.extend_from_slice(from);
     out.extend_from_slice(b"\"");
   };
 }
@@ -376,16 +384,12 @@ fn emit_js_under_operator<'a>(
       write!(out, "{}", value).unwrap();
     }
     Syntax::LiteralStringExpr { value } => {
-      // TODO Possibly invalid.
-      write!(
-        out,
-        "`{}`",
-        value
-          .replace("\\", "\\\\")
-          .replace("`", "\\`")
-          .replace("$", "\\$")
-      )
-      .unwrap();
+      // TODO Possibly not optimal, could use `'` or `"` instead.
+      out.extend_from_slice(b"`");
+      TEMPLATE_LITERAL_ESCAPE_MAT
+        .stream_replace_all(*value, &mut *out, TEMPLATE_LITERAL_ESCAPE_REP)
+        .unwrap();
+      out.extend_from_slice(b"`");
     }
     Syntax::LiteralTemplateExpr { parts } => {
       out.extend_from_slice(b"`");
@@ -397,7 +401,8 @@ fn emit_js_under_operator<'a>(
             out.extend_from_slice(b"}");
           }
           LiteralTemplatePart::String(str) => {
-            out.extend_from_slice(str.as_slice());
+            // TODO Escape.
+            out.extend_from_slice(str);
           }
         }
       }
@@ -934,7 +939,7 @@ fn emit_js_under_operator<'a>(
     }
     Syntax::ExportListStmt { names, from } => {
       out.extend_from_slice(b"export");
-      emit_import_or_export_statement_trailer(out, Some(names), from.as_ref());
+      emit_import_or_export_statement_trailer(out, Some(names), *from);
     }
     Syntax::ExpressionStmt { expression } => {
       emit_js(out, *expression);

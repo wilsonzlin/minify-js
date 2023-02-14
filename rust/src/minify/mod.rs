@@ -19,7 +19,6 @@ use parse_js::operator::OperatorName;
 use parse_js::session::Session;
 use parse_js::session::SessionHashMap;
 use parse_js::session::SessionHashSet;
-use parse_js::session::SessionString;
 use parse_js::session::SessionVec;
 use parse_js::source::SourceRange;
 use parse_js::symbol::Identifier;
@@ -29,13 +28,14 @@ use parse_js::symbol::Symbol;
 use parse_js::visit::JourneyControls;
 use parse_js::visit::Visitor;
 use std::fmt::Write;
+use std::str::from_utf8_unchecked;
 
 // We don't minify booleans, as `!0` and `!1` are good enough,and in a sufficiently large codebase minified variable names will have lengths >= 2 anyway.
 // TODO BigInt.
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
 enum Constant<'a> {
   Number(JsNumber),
-  String(SessionString<'a>),
+  String(&'a [u8]),
   Null,
   Builtin(Builtin<'static>),
 }
@@ -292,10 +292,9 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
           .track_constant_usage(scope, Constant::Number(*value));
       }
       Syntax::LiteralStringExpr { value } => {
-        // We must clone the string. Consider that it's owned, so a mutator of Syntax can technically mutate it, even though we'd never do such a thing. We can change this by instead making the parser use a immutable value, which could be as simple as a non-mutable reference.
         self
           .ctx
-          .track_constant_usage(scope, Constant::String(value.clone()));
+          .track_constant_usage(scope, Constant::String(value));
       }
       Syntax::LiteralNull {} => {
         self.ctx.track_constant_usage(scope, Constant::Null);
@@ -441,7 +440,7 @@ impl<'a, 'b> PretransformPass<'a, 'b> {
       .entry(ancestor_scope)
       .or_insert_with(|| MinifyScope::new(self.ctx.session))
       .constant_usages
-      .entry(constant.clone())
+      .entry(constant)
       .or_default();
     if usage.count <= 1 {
       return None;
@@ -456,7 +455,7 @@ impl<'a, 'b> PretransformPass<'a, 'b> {
           write!(repr, "Number{}", n)
         }
         Constant::String(s) => {
-          write!(repr, "String{}", s)
+          write!(repr, "String{}", unsafe { from_utf8_unchecked(s) })
         }
         Constant::Null => {
           write!(repr, "Null")
@@ -495,8 +494,7 @@ impl<'a, 'b> Visitor<'a> for PretransformPass<'a, 'b> {
         self.maybe_replace_constant_usage(scope, Constant::Number(*value))
       }
       Syntax::LiteralStringExpr { value } => {
-        // We must clone the string. Consider that it's owned, so a mutator of Syntax can technically mutate it, even though we'd never do such a thing. We can change this by instead making the parser use a immutable value, which could be as simple as a non-mutable reference.
-        self.maybe_replace_constant_usage(scope, Constant::String(value.clone()))
+        self.maybe_replace_constant_usage(scope, Constant::String(value))
       }
       Syntax::LiteralNull {} => self.maybe_replace_constant_usage(scope, Constant::Null),
       Syntax::IdentifierExpr { name } => {
@@ -676,7 +674,7 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
                 };
                 let init = new_node(self.session, scope, new_loc, match con {
                   Constant::Number(n) => Syntax::LiteralNumberExpr { value: *n },
-                  Constant::String(v) => Syntax::LiteralStringExpr { value: v.clone() },
+                  Constant::String(v) => Syntax::LiteralStringExpr { value: v },
                   Constant::Null => Syntax::LiteralNull {},
                   Constant::Builtin(b) => {
                     let mut expr = Syntax::IdentifierExpr {
@@ -934,7 +932,7 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
                 self.export_bindings.push(ExportBinding {
                   target: e.target.clone(),
                   alias: match &e.alias.stx {
-                    Syntax::IdentifierPattern { name } => name.clone(),
+                    Syntax::IdentifierPattern { name } => *name,
                     _ => unreachable!(),
                   },
                 });
