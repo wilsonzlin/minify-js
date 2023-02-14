@@ -35,7 +35,7 @@ use std::str::from_utf8_unchecked;
 #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
 enum Constant<'a> {
   Number(JsNumber),
-  String(&'a [u8]),
+  String(&'a str),
   Null,
   Builtin(Builtin<'static>),
 }
@@ -589,7 +589,7 @@ impl<'a, 'b> PretransformPass<'a, 'b> {
           write!(repr, "Number{}", n)
         }
         Constant::String(s) => {
-          write!(repr, "String{}", unsafe { from_utf8_unchecked(s) })
+          write!(repr, "String{}", s)
         }
         Constant::Null => {
           write!(repr, "Null")

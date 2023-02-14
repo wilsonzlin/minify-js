@@ -226,7 +226,7 @@ fn emit_class<'a>(
 fn emit_import_or_export_statement_trailer<'a>(
   out: &mut Vec<u8>,
   names: Option<&ExportNames<'a>>,
-  from: Option<&'a [u8]>,
+  from: Option<&'a str>,
 ) -> () {
   match names {
     Some(ExportNames::All(alias)) => {
@@ -257,7 +257,7 @@ fn emit_import_or_export_statement_trailer<'a>(
   if let Some(from) = from {
     out.extend_from_slice(b"from\"");
     // TODO Escape?
-    out.extend_from_slice(from);
+    out.extend_from_slice(from.as_bytes());
     out.extend_from_slice(b"\"");
   };
 }
@@ -387,7 +387,7 @@ fn emit_js_under_operator<'a>(
       // TODO Possibly not optimal, could use `'` or `"` instead.
       out.extend_from_slice(b"`");
       TEMPLATE_LITERAL_ESCAPE_MAT
-        .stream_replace_all(*value, &mut *out, TEMPLATE_LITERAL_ESCAPE_REP)
+        .stream_replace_all(value.as_bytes(), &mut *out, TEMPLATE_LITERAL_ESCAPE_REP)
         .unwrap();
       out.extend_from_slice(b"`");
     }
@@ -402,7 +402,7 @@ fn emit_js_under_operator<'a>(
           }
           LiteralTemplatePart::String(str) => {
             // TODO Escape.
-            out.extend_from_slice(str);
+            out.extend_from_slice(str.as_bytes());
           }
         }
       }
