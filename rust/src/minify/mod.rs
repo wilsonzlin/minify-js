@@ -58,6 +58,22 @@ struct MinifiedNameGenerator<'a> {
   state: SessionVec<'a, usize>,
 }
 
+fn get_only_expr_from_stmt<'a, 'b>(n: &'b mut Node<'a>) -> Option<&'b mut Node<'a>> {
+  let mut as_expr = None;
+  match &mut n.stx {
+    Syntax::ExpressionStmt { expression } => {
+      as_expr = Some(expression);
+    }
+    Syntax::BlockStmt { body } if body.len() == 1 => {
+      if let Syntax::ExpressionStmt { expression } = &mut body[0].stx {
+        as_expr = Some(expression);
+      }
+    }
+    _ => (),
+  };
+  as_expr
+}
+
 impl<'a> MinifiedNameGenerator<'a> {
   pub fn new(session: &'a Session) -> MinifiedNameGenerator<'a> {
     MinifiedNameGenerator {
@@ -278,6 +294,9 @@ fn get_builtin<'a>(
 // - Find uses of `new <var>` and set `is_used_as_constructor`.
 // - Find uses of `<var>.prototype` and set `has_prototype`.
 // - Count uses of constants. If there's more than one, create a new shared variable for it.
+// - Combine consecutive expression statements into one.
+// - Convert `if (x) { expr; }` to `x && expr`.
+// - Convert `if (x) { expr1; } else { expr2; }` to `x ? expr1 ; expr2`.
 struct IdentifierPass<'a, 'b> {
   ctx: Ctx<'a, 'b>,
 }
@@ -417,6 +436,121 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
       }
       _ => {}
     }
+  }
+
+  fn on_syntax_up(&mut self, node: &mut NodeData<'a>) -> () {
+    let loc = node.loc;
+    let scope = node.scope;
+    match &mut node.stx {
+      Syntax::IfStmt {
+        test,
+        consequent,
+        alternate,
+      } => {
+        let cons_expr = get_only_expr_from_stmt(consequent);
+        let alt_exists = alternate.is_some();
+        let alt_expr = alternate
+          .as_mut()
+          .and_then(|alt| get_only_expr_from_stmt(alt));
+
+        match (cons_expr, alt_exists, alt_expr) {
+          (Some(cons_expr), false, _) => {
+            let right = cons_expr.take(self.ctx.session);
+            let test = test.take(self.ctx.session);
+            node.stx = Syntax::ExpressionStmt {
+              expression: new_node(self.ctx.session, scope, loc, Syntax::BinaryExpr {
+                parenthesised: false,
+                operator: OperatorName::LogicalAnd,
+                left: test,
+                right,
+              }),
+            };
+          }
+          (Some(cons_expr), true, Some(alt_expr)) => {
+            let test = test.take(self.ctx.session);
+            let consequent = cons_expr.take(self.ctx.session);
+            let alternate = alt_expr.take(self.ctx.session);
+            node.stx = Syntax::ConditionalExpr {
+              parenthesised: false,
+              test,
+              consequent,
+              alternate,
+            };
+          }
+          _ => {}
+        };
+      }
+      Syntax::TopLevel { body } | Syntax::BlockStmt { body } => {
+        let mut returned = false;
+        // Next writable slot when shifting down due to gaps from deleting merged ExpressionStmt values.
+        let mut w = 0;
+        // Last ExpressionStmt to join any consequent ExpressionStmt expressions to using comma operator. If not currently in a sequence of ExpressionStmt values, this is None.
+        let mut l = None;
+        for r in 0..body.len() {
+          if returned {
+            // Drop remaining unreachable code.
+            break;
+          };
+          match &mut body[r].stx {
+            Syntax::ExpressionStmt { .. } => {
+              match l {
+                None => {
+                  body.swap(w, r);
+                  l = Some(w);
+                  w += 1;
+                }
+                Some(l) => {
+                  let combined = new_node(
+                    self.ctx.session,
+                    scope,
+                    body[l].loc + body[r].loc,
+                    Syntax::BinaryExpr {
+                      parenthesised: false,
+                      operator: OperatorName::Comma,
+                      left: body[l].take(self.ctx.session),
+                      right: body[r].take(self.ctx.session),
+                    },
+                  );
+                  body[l] = combined;
+                }
+              };
+            }
+            Syntax::ReturnStmt { value } => {
+              returned = true;
+              match (l, value) {
+                (Some(l), Some(rv)) => {
+                  let rv = rv.take(self.ctx.session);
+                  let new_loc = body[l].loc + rv.loc;
+                  let combined_comma =
+                    new_node(self.ctx.session, scope, new_loc, Syntax::BinaryExpr {
+                      parenthesised: false,
+                      operator: OperatorName::Comma,
+                      left: body[l].take(self.ctx.session),
+                      right: rv,
+                    });
+                  let new_return = new_node(self.ctx.session, scope, new_loc, Syntax::ReturnStmt {
+                    value: Some(combined_comma),
+                  });
+                  body[l] = new_return;
+                }
+                _ => {
+                  l = None;
+                  body.swap(w, r);
+                  w += 1;
+                }
+              };
+            }
+            _ => {
+              l = None;
+              body.swap(w, r);
+              w += 1;
+            }
+          };
+        }
+        body.truncate(w);
+      }
+      _ => {}
+    };
   }
 }
 
