@@ -16,3 +16,5 @@ Some forms include:
 - Using Object.assign.
 - Replacing `typeof` and `instanceof` with functions.
 - Replacing common statement patterns with helper functions.
+
+Aliasing repeated constants (including built-in variables and properties) was dropped in commit [ff48b8b](https://github.com/wilsonzlin/minify-js/commit/ff48b8b).
