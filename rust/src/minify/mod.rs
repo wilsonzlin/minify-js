@@ -24,6 +24,7 @@ use parse_js::symbol::ScopeFlag;
 use parse_js::symbol::Symbol;
 use parse_js::visit::JourneyControls;
 use parse_js::visit::Visitor;
+use std::str::from_utf8_unchecked;
 
 struct ExportBinding<'a> {
   target: SourceRange<'a>,
@@ -243,6 +244,9 @@ fn minify_names<'a>(
 // - Combine consecutive expression statements into one.
 // - Convert `if (x) { expr; }` to `x && expr`.
 // - Convert `if (x) { expr1; } else { expr2; }` to `x ? expr1 ; expr2`.
+// - Concatenate addition of two literal strings.
+// - Unwrap unnecessary block statements.
+// - Drop debugger statements.
 struct IdentifierPass<'a, 'b> {
   ctx: Ctx<'a, 'b>,
 }
@@ -336,6 +340,31 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
     let loc = node.loc;
     let scope = node.scope;
     match &mut node.stx {
+      Syntax::BinaryExpr {
+        operator: OperatorName::Addition,
+        left:
+          NodeData {
+            stx: Syntax::LiteralStringExpr { value: l },
+            ..
+          },
+        right:
+          NodeData {
+            stx: Syntax::LiteralStringExpr { value: r },
+            ..
+          },
+        ..
+      } => {
+        let concat = self
+          .ctx
+          .session
+          .get_allocator()
+          .alloc_slice_fill_default(l.len() + r.len());
+        concat[..l.len()].copy_from_slice(l.as_bytes());
+        concat[l.len()..].copy_from_slice(r.as_bytes());
+        node.stx = Syntax::LiteralStringExpr {
+          value: unsafe { from_utf8_unchecked(concat) },
+        };
+      }
       Syntax::IfStmt {
         test,
         consequent,
