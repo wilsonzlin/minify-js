@@ -28,7 +28,6 @@ use parse_js::symbol::Symbol;
 use parse_js::visit::JourneyControls;
 use parse_js::visit::Visitor;
 use std::fmt::Write;
-use std::str::from_utf8_unchecked;
 
 // We don't minify booleans, as `!0` and `!1` are good enough,and in a sufficiently large codebase minified variable names will have lengths >= 2 anyway.
 // TODO BigInt.
@@ -448,6 +447,7 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
         alternate,
       } => {
         let cons_expr = get_only_expr_from_stmt(consequent);
+        // We need this in case alternate exists but we can't coerce it into an expression.
         let alt_exists = alternate.is_some();
         let alt_expr = alternate
           .as_mut()
@@ -470,11 +470,13 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
             let test = test.take(self.ctx.session);
             let consequent = cons_expr.take(self.ctx.session);
             let alternate = alt_expr.take(self.ctx.session);
-            node.stx = Syntax::ConditionalExpr {
-              parenthesised: false,
-              test,
-              consequent,
-              alternate,
+            node.stx = Syntax::ExpressionStmt {
+              expression: new_node(self.ctx.session, scope, loc, Syntax::ConditionalExpr {
+                parenthesised: false,
+                test,
+                consequent,
+                alternate,
+              }),
             };
           }
           _ => {}
@@ -486,35 +488,58 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
         let mut w = 0;
         // Last ExpressionStmt to join any consequent ExpressionStmt expressions to using comma operator. If not currently in a sequence of ExpressionStmt values, this is None.
         let mut l = None;
-        for r in 0..body.len() {
+        // Next readable slot to process.
+        let mut r = 0;
+        // We can't use a for loop or cache `body.len()` as it might change (e.g. unpacking redundant block statement).
+        while r < body.len() {
           if returned {
             // Drop remaining unreachable code.
+            // TODO There may be more, if this block isn't conditional.
             break;
           };
-          match &mut body[r].stx {
-            Syntax::ExpressionStmt { .. } => {
-              match l {
-                None => {
-                  body.swap(w, r);
-                  l = Some(w);
-                  w += 1;
+          // Get `scope` before we borrow mutably for `stx`.
+          let r_scope = body[r].scope;
+          let keep = match &mut body[r].stx {
+            Syntax::EmptyStmt {} | Syntax::DebuggerStmt {} => false,
+            // NOTE: We must match here as BlockStmt may not always be a block statement (e.g. `for`, `while`, function bodies).
+            Syntax::BlockStmt { body: block_body } => {
+              if block_body.is_empty() {
+                false
+              } else if r_scope.symbol_names().is_empty() {
+                // This block statement doesn't have any block-scoped declarations, so it's unnecessary.
+                let mut to_add = self.ctx.session.new_vec();
+                for s in block_body {
+                  to_add.push(s.take(self.ctx.session));
                 }
-                Some(l) => {
-                  let combined = new_node(
-                    self.ctx.session,
-                    scope,
-                    body[l].loc + body[r].loc,
-                    Syntax::BinaryExpr {
-                      parenthesised: false,
-                      operator: OperatorName::Comma,
-                      left: body[l].take(self.ctx.session),
-                      right: body[r].take(self.ctx.session),
-                    },
-                  );
-                  body[l] = combined;
-                }
-              };
+                // Insert after current `r` so we process these next.
+                body.splice(r + 1..r + 1, to_add);
+                false
+              } else {
+                true
+              }
             }
+            Syntax::ExpressionStmt { expression: r_expr } => match l {
+              None => {
+                l = Some(w);
+                true
+              }
+              Some(l) => {
+                let right = r_expr.take(self.ctx.session);
+                let new_loc = body[l].loc + body[r].loc;
+                let Syntax::ExpressionStmt { expression: l_expr } = &mut body[l].stx else {
+                    unreachable!();
+                  };
+                let left = l_expr.take(self.ctx.session);
+                let combined = new_node(self.ctx.session, scope, new_loc, Syntax::BinaryExpr {
+                  parenthesised: false,
+                  operator: OperatorName::Comma,
+                  left,
+                  right,
+                });
+                *l_expr = combined;
+                false
+              }
+            },
             Syntax::ReturnStmt { value } => {
               returned = true;
               match (l, value) {
@@ -532,20 +557,24 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
                     value: Some(combined_comma),
                   });
                   body[l] = new_return;
+                  false
                 }
                 _ => {
                   l = None;
-                  body.swap(w, r);
-                  w += 1;
+                  true
                 }
-              };
+              }
             }
             _ => {
               l = None;
-              body.swap(w, r);
-              w += 1;
+              true
             }
           };
+          if keep {
+            body.swap(w, r);
+            w += 1;
+          };
+          r += 1;
         }
         body.truncate(w);
       }
