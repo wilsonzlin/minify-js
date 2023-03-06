@@ -54,14 +54,13 @@ fn test_emit_global() {
     "\
       function*gen(){yield*`hello world!`}\
       !()=>{\
-      let m=1,o=7,n=2;\
       var a=(()=>{a()});\
       com.java.names.long;\
       module.functions;\
-      var b=m,c,{brown:d,_:[e,f,,,...g],...h}=i;\
-      (({the:b}=a,[c]=n)=>{{let b=a(e)}b,c,d,e;return;1.2.toString()})();\
+      var b=1,c,{brown:d,_:[e,f,,,...g],...h}=i;\
+      (({the:b}=a,[c]=2)=>{{let b=a(e)}b,c,d,e;return})();\
       const j=({})=>{};\
-      const k=a=>(m,n),l=(m/o)/(n/o)\
+      const k=a=>(1,2),l=(1/7)/(2/7)\
       }()\
     ",
   )
@@ -223,5 +222,79 @@ fn test_emit_jsx() {
       render(<CompImp><CompLocal/></CompImp>);
     "#,
     r#"import A from"./comp";let a={a:`div`};const B=()=><a.a><strong/></a.a>;render(<A><B/></A>)"#,
+  );
+}
+
+#[test]
+fn test_advanced_if_minification() {
+  check(
+    TopLevelMode::Global,
+    r#"
+      function foo(arg) {
+        if (arg) {
+          1; 2; 3; 4;
+          if (cond) {
+            5;
+          }
+          6; 7;
+        }
+      }
+    "#,
+    r#"var foo=(a=>{a&&(1,2,3,4,cond&&5,6,7)})"#,
+  );
+  check(
+    TopLevelMode::Global,
+    r#"
+      function foo(arg) {
+        if (arg) {
+          1; 2; 3; 4;
+          if (cond) {
+            return 5;
+          }
+          6; 7;
+          return 8;
+        }
+      }
+    "#,
+    r#"var foo=(a=>{if(a)return 1,2,3,4,cond?5:(6,7,8)})"#,
+  );
+  check(
+    TopLevelMode::Global,
+    r#"
+      function foo(arg) {
+        if (arg) {
+          1; 2; 3; 4;
+          if (cond) {
+            return 5;
+          }
+          6; 7;
+          return 8;
+        } else {
+          9; 10;
+          return 11;
+        }
+      }
+    "#,
+    r#"var foo=(a=>{if(a)return 1,2,3,4,cond?5:(6,7,8);9;10;return 11})"#,
+  );
+  check(
+    TopLevelMode::Global,
+    r#"
+      function foo(arg) {
+        if (arg) {
+          var x = 1;
+          if (cond) {
+            var y = 2;
+            return y;
+          } else {
+            return x;
+          }
+        } else {
+          var z = 3;
+          return z;
+        }
+      }
+    "#,
+    r#"var foo=(a=>{if(a)return 1,2,3,4,cond?5:(6,7,8);9;10;return 11})"#,
   );
 }

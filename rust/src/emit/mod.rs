@@ -431,9 +431,6 @@ fn emit_js_under_operator<'a>(
         };
       }
     }
-    Syntax::VarStmt { declaration } => {
-      emit_js(out, *declaration);
-    }
     Syntax::IdentifierPattern { name } => {
       out.extend_from_slice(name.as_slice());
     }
@@ -795,8 +792,8 @@ fn emit_js_under_operator<'a>(
       emit_js(out, *value);
       out.extend_from_slice(b"}");
     }
-    Syntax::JsxMember { base, path } => {
-      out.extend_from_slice(base.as_slice());
+    Syntax::JsxMemberExpression { base, path } => {
+      emit_js(out, *base);
       for c in path {
         out.extend_from_slice(b".");
         out.extend_from_slice(c.as_slice());
@@ -1143,8 +1140,8 @@ fn emit_js_under_operator<'a>(
         ObjectMemberType::Valued { key, value } => {
           emit_class_or_object_member(out, key, value, b":");
         }
-        ObjectMemberType::Shorthand { name } => {
-          out.extend_from_slice(name.as_slice());
+        ObjectMemberType::Shorthand { identifier } => {
+          emit_js(out, *identifier);
         }
         ObjectMemberType::Rest { value } => {
           out.extend_from_slice(b"...");

@@ -11,6 +11,7 @@ use parse_js::ast::VarDeclMode;
 use parse_js::ast::VariableDeclarator;
 use parse_js::char::ID_CONTINUE_CHARSTR;
 use parse_js::char::ID_START_CHARSTR;
+use parse_js::flag::Flags;
 use parse_js::lex::KEYWORD_STRS;
 use parse_js::operator::OperatorName;
 use parse_js::session::Session;
@@ -38,20 +39,188 @@ struct MinifiedNameGenerator<'a> {
   state: SessionVec<'a, usize>,
 }
 
-fn get_only_expr_from_stmt<'a, 'b>(n: &'b mut Node<'a>) -> Option<&'b mut Node<'a>> {
-  let mut as_expr = None;
-  match &mut n.stx {
-    Syntax::ExpressionStmt { expression } => {
-      as_expr = Some(expression);
-    }
-    Syntax::BlockStmt { body } if body.len() == 1 => {
-      if let Syntax::ExpressionStmt { expression } = &mut body[0].stx {
-        as_expr = Some(expression);
-      }
-    }
-    _ => (),
+// If statement optimisation:
+// - `if (a) { b }`            => `a && b`             if `b` can be reduced to a single expression.
+// - `if (a) { b } else { c }` => `a ? b : c`          if `b` and `c` can be reduced to a single expression.
+// - `if (a) { b; return c }`  => `if (a) return b, c` if `b` can be reduced to a single expression.
+// The last form is more for normalisation: it doesn't minify much by itself (it still remains a statement), but allows a containing `if` to optimise `if (a) { b; return c } d; return e` into `return a ? (b, c) : (d, e)` if `b` and `d` can be reduced to a single expression. Otherwise, we wouldn't be able to minify the containing `if`.
+// Note that it's not possible for both branches to return, as a previous pass should have already unwrapped the unnecessary block. We also normalise it such that if only `else` returns, it's flipped, and then the `else` can be unwrapped.
+
+// We only perform advanced statement analysis and transformation to expression in `if` and `else` blocks as that will allow opportunities to transform `if` into logical expressions. This isn't useful elsewhere, as a sequence of expression statements is the same size as a sequence of expressions separated by commas, so the fact it's an expression is not being leveraged.
+
+// We first perform some analysis to see if it's even worthwhile to perform this optimisation.
+fn analyse_if_branch<'a>(stx: &Syntax<'a>) -> bool {
+  let Syntax::BlockStmt { body } = stx else {
+    // We should have already normalised all `if` branches into a block if they were single statements, so this should not be possible.
+    unreachable!();
   };
-  as_expr
+  let mut block_returned = false;
+  let mut if_returned = false;
+  for stmt in body.iter() {
+    match &stmt.stx {
+      Syntax::VarDecl {
+        mode, declarators, ..
+      } => {
+        match mode {
+          // We can make `var` declarations into expressions by hoisting the declaration part and leaving behind an assignment expression (if an initialiser exists).
+          // TODO Support non-identifier patterns, although they may not be worth minifying if we have to hoist and therefore duplicate the variable names.
+          VarDeclMode::Var => {
+            if declarators.iter().any(|d| match d.pattern.stx {
+              Syntax::IdentifierPattern { .. } => false,
+              _ => true,
+            }) {
+              return false;
+            }
+          }
+          // TODO We currently disallow if `let` or `const`, however there is a complex approach we could consider in the future: they're scoped to the block, so we can either wrap our optimised expression in a block or create a unique variable in the nearest closure and hoist it like `var`. Since the former means we're still left with a (block) statement, we choose the latter, but that means we can't do this if we're in the global scope as we're not allowed to introduce global variables (even if they're very unlikely to collide in reality). We'd have to replace all usages of these variables, however.
+          VarDeclMode::Const | VarDeclMode::Let => return false,
+        };
+      }
+      Syntax::ExpressionStmt { .. } => {}
+      Syntax::ReturnStmt { .. } => block_returned = true,
+      // Since we perform this optimisation bottom-up, any IfStmt should already be optimised, so if they were optimised and still exist as a statement, they should only have exactly one statement of `return` in `if` and `else`.
+      Syntax::IfStmt {
+        consequent: NodeData {
+          stx: Syntax::ReturnStmt { .. },
+          ..
+        },
+        alternate: None,
+        ..
+      } => if_returned = true,
+      // Debugger and empty statements should already be removed.
+      _ => return false,
+    };
+  }
+  // We must only be left with at most one return statement (i.e. unconditional, although value can be conditional). Essentially, this means that if we have an `if (x) return`, we must have a block-level return, as otherwise we cannot represent it as a single `return`.
+  !if_returned || block_returned
+}
+
+struct ProcessedIfBranch<'a> {
+  expression: Node<'a>,
+  hoisted_vars: SessionVec<'a, SourceRange<'a>>,
+  // If true, it means that it's not an expression, but a single return statement with the expression as the return value.
+  returns: bool,
+}
+
+fn process_if_branch_block<'a, 'b>(
+  session: &'a Session,
+  scope: Scope<'a>,
+  body: &'b mut [Node<'a>],
+) -> ProcessedIfBranch<'a> {
+  let mut returns = false;
+  let mut hoisted_vars: SessionVec<'a, SourceRange<'a>> = session.new_vec();
+  let mut expressions: SessionVec<'a, Node<'a>> = session.new_vec();
+  let mut i = 0;
+  while i < body.len() {
+    let loc = body[i].loc;
+    let scope = body[i].scope;
+    match &mut body[i].stx {
+      Syntax::ExpressionStmt { expression } => {
+        expressions.push(expression.take(session));
+      }
+      Syntax::ReturnStmt { value } => {
+        returns = true;
+        expressions.push(match value {
+          Some(value) => value.take(session),
+          None => new_node(session, scope, loc, Syntax::IdentifierExpr {
+            name: SourceRange::from_slice(b"undefined"),
+          }),
+        });
+      }
+      Syntax::VarDecl {
+        declarators,
+        mode: VarDeclMode::Var,
+        ..
+      } => {
+        for decl in declarators.iter_mut() {
+          let target = decl.pattern.take(session);
+          let Syntax::IdentifierPattern { name } = target.stx else {
+            unreachable!();
+          };
+          hoisted_vars.push(name);
+          if let Some(init) = &mut decl.initializer {
+            let right = init.take(session);
+            expressions.push(new_node(
+              session,
+              scope,
+              name + init.loc,
+              Syntax::BinaryExpr {
+                parenthesised: false,
+                operator: OperatorName::Assignment,
+                left: target,
+                right,
+              },
+            ));
+          }
+        }
+      }
+      Syntax::IfStmt {
+        test,
+        consequent:
+          NodeData {
+            stx: Syntax::ReturnStmt { value },
+            loc: ret_loc,
+            ..
+          },
+        alternate: None,
+      } => {
+        returns = true;
+
+        // Take before we reborrow mutably for process_if_branch_block.
+        let test = test.take(session);
+        let consequent = value.as_mut().map(|v| v.take(session)).unwrap_or(new_node(
+          session,
+          scope,
+          *ret_loc,
+          Syntax::IdentifierExpr {
+            name: SourceRange::from_slice(b"undefined"),
+          },
+        ));
+
+        let mut remaining = process_if_branch_block(session, scope, &mut body[i + 1..]);
+        assert!(remaining.returns);
+        hoisted_vars.append(&mut remaining.hoisted_vars);
+        let alternate = remaining.expression;
+        expressions.push(new_node(session, scope, loc, Syntax::ConditionalExpr {
+          parenthesised: false,
+          test,
+          consequent,
+          alternate,
+        }));
+        break;
+      }
+      _ => unreachable!(),
+    };
+    i += 1;
+  }
+
+  ProcessedIfBranch {
+    expression: expressions
+      .into_iter()
+      .reduce(|left, right| {
+        new_node(session, scope, left.loc + right.loc, Syntax::BinaryExpr {
+          parenthesised: false,
+          operator: OperatorName::Comma,
+          left,
+          right,
+        })
+      })
+      .unwrap(),
+    hoisted_vars,
+    returns,
+  }
+}
+
+fn process_if_branch<'a, 'b>(
+  session: &'a Session,
+  scope: Scope<'a>,
+  branch: &'b mut NodeData<'a>,
+) -> ProcessedIfBranch<'a> {
+  let Syntax::BlockStmt { body } = &mut branch.stx else {
+    // We should have already normalised all `if` branches into a block if they were single statements, so this should not be possible.
+    unreachable!()
+  };
+  process_if_branch_block(session, scope, body)
 }
 
 impl<'a> MinifiedNameGenerator<'a> {
@@ -138,6 +307,8 @@ struct MinifyScope<'a> {
   // Function declarations within this closure-like scope that must be hoisted to declarations at the very beginning of this closure's code (so we can transform them to `var` and still have them work correctly). There may be multiple closures with the same name, nested deep with many blocks and branches, which is why we use a map; the last visited (lexical) declaration wins. Note that this is only populated if this scope is a closure; function declarations don't hoist to blocks.
   // Since they could be deep and anywhere, we must take them and move them into this map; we can't just look at a BlockStmt's children as they may not always be there.
   hoisted_functions: SessionHashMap<'a, Identifier<'a>, Node<'a>>,
+  // `var` declarations in this closure that need to be moved to allow for some optimisation.
+  hoisted_vars: SessionVec<'a, Identifier<'a>>,
 }
 
 impl<'a> MinifyScope<'a> {
@@ -145,13 +316,14 @@ impl<'a> MinifyScope<'a> {
     MinifyScope {
       inherited_vars: session.new_hashset(),
       hoisted_functions: session.new_hashmap(),
+      hoisted_vars: session.new_vec(),
     }
   }
 }
 
 struct Ctx<'a, 'b> {
   session: &'a Session,
-  symbols: &'b mut SessionHashMap<'a, Symbol<'a>, MinifySymbol<'a>>,
+  symbols: &'b mut SessionHashMap<'a, Symbol, MinifySymbol<'a>>,
   scopes: &'b mut SessionHashMap<'a, Scope<'a>, MinifyScope<'a>>,
 }
 
@@ -182,7 +354,7 @@ fn minify_names<'a>(
   session: &'a Session,
   scope: Scope<'a>,
   minify_scopes: &mut SessionHashMap<'a, Scope<'a>, MinifyScope<'a>>,
-  minify_symbols: &mut SessionHashMap<'a, Symbol<'a>, MinifySymbol<'a>>,
+  minify_symbols: &mut SessionHashMap<'a, Symbol, MinifySymbol<'a>>,
 ) {
   // It's possible that the entry doesn't exist, if there were no inherited variables during the first pass.
   let minify_scope = minify_scopes
@@ -214,7 +386,7 @@ fn minify_names<'a>(
       continue;
     };
     min_sym.minified_name =
-      Some(next_min_name.generate_next_available_minified_name(&minified_inherited_vars))
+      Some(next_min_name.generate_next_available_minified_name(&minified_inherited_vars));
   }
   for &sym_name in scope.symbol_names().iter() {
     let sym = scope.get_symbol(sym_name).unwrap();
@@ -247,15 +419,111 @@ fn minify_names<'a>(
 // - Concatenate addition of two literal strings.
 // - Unwrap unnecessary block statements.
 // - Drop debugger statements.
+// - Normalise `if-else` branches into block statements.
 struct IdentifierPass<'a, 'b> {
   ctx: Ctx<'a, 'b>,
+}
+
+fn stmt_has_return<'a>(stx: &Syntax<'a>) -> bool {
+  match stx {
+    Syntax::ReturnStmt { .. } => true,
+    Syntax::BlockStmt { body } => body.iter().any(|n| stmt_has_return(&n.stx)),
+    _ => false,
+  }
 }
 
 impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
   fn on_syntax_down(&mut self, n: &mut NodeData<'a>, _ctl: &mut JourneyControls) -> () {
     let scope = n.scope;
-    match &n.stx {
+    match &mut n.stx {
+      Syntax::IfStmt {
+        consequent,
+        alternate,
+        ..
+      } => {
+        match &consequent.stx {
+          Syntax::BlockStmt { .. } => {}
+          _ => {
+            let inner = consequent.take(self.ctx.session);
+            let wrapped = new_node(
+              self.ctx.session,
+              inner.scope,
+              inner.loc,
+              Syntax::BlockStmt {
+                body: {
+                  let mut body = self.ctx.session.new_vec();
+                  body.push(inner);
+                  body
+                },
+              },
+            );
+            *consequent = wrapped;
+          }
+        };
+        if let Some(alt) = alternate {
+          match &alt.stx {
+            Syntax::BlockStmt { .. } => {}
+            _ => {
+              let inner = alt.take(self.ctx.session);
+              let wrapped = new_node(
+                self.ctx.session,
+                inner.scope,
+                inner.loc,
+                Syntax::BlockStmt {
+                  body: {
+                    let mut body = self.ctx.session.new_vec();
+                    body.push(inner);
+                    body
+                  },
+                },
+              );
+              *alt = wrapped;
+            }
+          }
+        }
+      }
+      Syntax::BlockStmt { body } => {
+        let mut i = 0;
+        while i < body.len() {
+          if let Syntax::IfStmt {
+            test,
+            consequent,
+            alternate: maybe_alternate,
+          } = &mut body[i].stx
+          {
+            if let Some(alternate) = maybe_alternate {
+              // If `if` returns, unwrap `else`.
+              // If `else` returns **AND** `if` does not return, swap `if` and `else`, and then unwrap `else` (post-swap).
+              // Whatever is unwrapped becomes another statement in the current body and should be processed, not skipped.
+              let cons_has_return = stmt_has_return(&consequent.stx);
+              let swapped = if !cons_has_return && stmt_has_return(&alternate.stx) {
+                core::mem::swap(consequent, alternate);
+                let orig_test = test.take(self.ctx.session);
+                test.stx = Syntax::UnaryExpr {
+                  parenthesised: false,
+                  operator: OperatorName::LogicalNot,
+                  argument: orig_test,
+                };
+                true
+              } else {
+                false
+              };
+              if swapped || cons_has_return {
+                // We can't always double-unwrap if it's a block as the block might be necessary (e.g. `let`). We have later optimisations that will unwrap it if possible.
+                let alternate_branch = alternate.take(self.ctx.session);
+                *maybe_alternate = None;
+                body.insert(i + 1, alternate_branch);
+              }
+            }
+          };
+          i += 1;
+        }
+      }
       Syntax::IdentifierExpr { name } => {
+        self.ctx.track_variable_usage(scope, *name);
+      }
+      // IdentifierPattern also appears in destructuring, not just declarations. It's safe either way; if it's a declaration, its scope will have its declaration, so there will be no inheritance.
+      Syntax::IdentifierPattern { name } => {
         self.ctx.track_variable_usage(scope, *name);
       }
       Syntax::MemberExpr {
@@ -297,13 +565,14 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
           };
         };
       }
-      Syntax::JsxMember { base: name, .. } => {
-        self.ctx.track_variable_usage(scope, *name);
-      }
-      Syntax::JsxName {
-        name,
-        namespace: None,
-      } if !name.as_slice()[0].is_ascii_lowercase() => {
+      Syntax::JsxElement {
+        name:
+          Some(NodeData {
+            stx: Syntax::IdentifierExpr { name },
+            ..
+          }),
+        ..
+      } => {
         if let Some(sym) = n.scope.find_symbol(*name) {
           self
             .ctx
@@ -312,25 +581,6 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
             .or_default()
             .is_used_as_jsx_component = true;
         };
-        self.ctx.track_variable_usage(scope, *name);
-      }
-      // IdentifierPattern also appears in destructuring, not just declarations. It's safe either way; if it's a declaration, its scope will have its declaration, so there will be no inheritance.
-      Syntax::IdentifierPattern { name } => {
-        self.ctx.track_variable_usage(scope, *name);
-      }
-      // Same rationale as IdentifierPattern. Note that ClassOrObjectMemberKey::Direct doesn't use an IdentifierPattern, so we must visit it explicitly.
-      Syntax::ObjectPatternProperty {
-        key: ClassOrObjectMemberKey::Direct(name),
-        target: None,
-        ..
-      } => {
-        // TODO What if `name` is a keyword, number, string, etc.?
-        self.ctx.track_variable_usage(scope, *name);
-      }
-      Syntax::ObjectMember {
-        typ: ObjectMemberType::Shorthand { name },
-      } => {
-        self.ctx.track_variable_usage(scope, *name);
       }
       _ => {}
     }
@@ -365,66 +615,23 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
           value: unsafe { from_utf8_unchecked(concat) },
         };
       }
-      Syntax::IfStmt {
-        test,
-        consequent,
-        alternate,
-      } => {
-        let cons_expr = get_only_expr_from_stmt(consequent);
-        // We need this in case alternate exists but we can't coerce it into an expression.
-        let alt_exists = alternate.is_some();
-        let alt_expr = alternate
-          .as_mut()
-          .and_then(|alt| get_only_expr_from_stmt(alt));
-
-        match (cons_expr, alt_exists, alt_expr) {
-          (Some(cons_expr), false, _) => {
-            let right = cons_expr.take(self.ctx.session);
-            let test = test.take(self.ctx.session);
-            node.stx = Syntax::ExpressionStmt {
-              expression: new_node(self.ctx.session, scope, loc, Syntax::BinaryExpr {
-                parenthesised: false,
-                operator: OperatorName::LogicalAnd,
-                left: test,
-                right,
-              }),
-            };
-          }
-          (Some(cons_expr), true, Some(alt_expr)) => {
-            let test = test.take(self.ctx.session);
-            let consequent = cons_expr.take(self.ctx.session);
-            let alternate = alt_expr.take(self.ctx.session);
-            node.stx = Syntax::ExpressionStmt {
-              expression: new_node(self.ctx.session, scope, loc, Syntax::ConditionalExpr {
-                parenthesised: false,
-                test,
-                consequent,
-                alternate,
-              }),
-            };
-          }
-          _ => {}
-        };
-      }
-      Syntax::TopLevel { body } | Syntax::BlockStmt { body } => {
+      // This is bottom-up as we could remove nested blocks recursively.
+      Syntax::BlockStmt { body } => {
         let mut returned = false;
         // Next writable slot when shifting down due to gaps from deleting merged ExpressionStmt values.
         let mut w = 0;
-        // Last ExpressionStmt to join any consequent ExpressionStmt expressions to using comma operator. If not currently in a sequence of ExpressionStmt values, this is None.
-        let mut l = None;
         // Next readable slot to process.
         let mut r = 0;
         // We can't use a for loop or cache `body.len()` as it might change (e.g. unpacking redundant block statement).
         while r < body.len() {
           if returned {
             // Drop remaining unreachable code.
-            // TODO There may be more, if this block isn't conditional.
+            // TODO There may be more code outside this block that's now unreachable and can be removed.
             break;
           };
           // Get `scope` before we borrow mutably for `stx`.
           let r_scope = body[r].scope;
           let keep = match &mut body[r].stx {
-            Syntax::EmptyStmt {} | Syntax::DebuggerStmt {} => false,
             // NOTE: We must match here as BlockStmt may not always be a block statement (e.g. `for`, `while`, function bodies).
             Syntax::BlockStmt { body: block_body } => {
               if block_body.is_empty() {
@@ -442,57 +649,15 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
                 true
               }
             }
-            Syntax::ExpressionStmt { expression: r_expr } => match l {
-              None => {
-                l = Some(w);
-                true
-              }
-              Some(l) => {
-                let right = r_expr.take(self.ctx.session);
-                let new_loc = body[l].loc + body[r].loc;
-                let Syntax::ExpressionStmt { expression: l_expr } = &mut body[l].stx else {
-                    unreachable!();
-                  };
-                let left = l_expr.take(self.ctx.session);
-                let combined = new_node(self.ctx.session, scope, new_loc, Syntax::BinaryExpr {
-                  parenthesised: false,
-                  operator: OperatorName::Comma,
-                  left,
-                  right,
-                });
-                *l_expr = combined;
-                false
-              }
-            },
-            Syntax::ReturnStmt { value } => {
-              returned = true;
-              match (l, value) {
-                (Some(l), Some(rv)) => {
-                  let rv = rv.take(self.ctx.session);
-                  let new_loc = body[l].loc + rv.loc;
-                  let combined_comma =
-                    new_node(self.ctx.session, scope, new_loc, Syntax::BinaryExpr {
-                      parenthesised: false,
-                      operator: OperatorName::Comma,
-                      left: body[l].take(self.ctx.session),
-                      right: rv,
-                    });
-                  let new_return = new_node(self.ctx.session, scope, new_loc, Syntax::ReturnStmt {
-                    value: Some(combined_comma),
-                  });
-                  body[l] = new_return;
-                  false
-                }
-                _ => {
-                  l = None;
-                  true
-                }
-              }
-            }
-            _ => {
-              l = None;
+            Syntax::ExpressionStmt { expression } => {
+              // TODO Remove if pure.
               true
             }
+            Syntax::ReturnStmt { .. } => {
+              returned = true;
+              true
+            }
+            _ => true,
           };
           if keep {
             body.swap(w, r);
@@ -501,6 +666,76 @@ impl<'a, 'b> Visitor<'a> for IdentifierPass<'a, 'b> {
           r += 1;
         }
         body.truncate(w);
+      }
+      Syntax::IfStmt {
+        test,
+        consequent,
+        alternate,
+      } => {
+        // Note that we cannot process unless both branches can be processed, otherwise we'll be left with one branch mutated.
+        let cons_ok = analyse_if_branch(&consequent.stx);
+        let alt_ok = alternate.as_ref().map(|alt| analyse_if_branch(&alt.stx));
+
+        match (cons_ok, alt_ok) {
+          (true, None) => {
+            let closure_scope = scope.find_self_or_ancestor(|t| t.is_closure()).unwrap();
+            let cons_expr = process_if_branch(self.ctx.session, scope, consequent);
+            let min_scope = self
+              .ctx
+              .scopes
+              .entry(closure_scope)
+              .or_insert_with(|| MinifyScope::new(self.ctx.session));
+            min_scope
+              .hoisted_vars
+              .extend_from_slice(&cons_expr.hoisted_vars);
+            if cons_expr.returns {
+              consequent.stx = Syntax::ReturnStmt {
+                value: Some(cons_expr.expression),
+              };
+            } else {
+              let right = cons_expr.expression;
+              let test = test.take(self.ctx.session);
+              node.stx = Syntax::ExpressionStmt {
+                expression: new_node(self.ctx.session, scope, loc, Syntax::BinaryExpr {
+                  parenthesised: false,
+                  operator: OperatorName::LogicalAnd,
+                  left: test,
+                  right,
+                }),
+              };
+            }
+          }
+          (true, Some(true)) => {
+            let closure_scope = scope.find_self_or_ancestor(|t| t.is_closure()).unwrap();
+            let cons_expr = process_if_branch(self.ctx.session, scope, consequent);
+            let alt_expr = process_if_branch(self.ctx.session, scope, alternate.as_mut().unwrap());
+            let min_scope = self
+              .ctx
+              .scopes
+              .entry(closure_scope)
+              .or_insert_with(|| MinifyScope::new(self.ctx.session));
+            min_scope
+              .hoisted_vars
+              .extend_from_slice(&cons_expr.hoisted_vars);
+            min_scope
+              .hoisted_vars
+              .extend_from_slice(&alt_expr.hoisted_vars);
+            // Due to normalisation, it's not possible for an `if-else` to return in either branch, because one branch would've been unwrapped.
+            assert!(cons_expr.returns && alt_expr.returns);
+            let test = test.take(self.ctx.session);
+            let consequent = cons_expr.expression;
+            let alternate = alt_expr.expression;
+            node.stx = Syntax::ExpressionStmt {
+              expression: new_node(self.ctx.session, scope, loc, Syntax::ConditionalExpr {
+                parenthesised: false,
+                test,
+                consequent,
+                alternate,
+              }),
+            };
+          }
+          _ => {}
+        };
       }
       _ => {}
     };
@@ -543,12 +778,21 @@ impl<'a, 'b> Visitor<'a> for PretransformPass<'a, 'b> {
   }
 }
 
+fn unwrap_block_statement_if_possible<'a>(session: &'a Session, node: &mut NodeData<'a>) {
+  if let Syntax::BlockStmt { body } = &mut node.stx {
+    if body.len() == 1 {
+      let stmt = body[0].take(session);
+      core::mem::swap(node, stmt);
+    };
+  };
+}
+
 // The third and main pass, that does most of the work. This should be run after the `minify_names` function.
 struct MinifyPass<'a, 'b> {
   session: &'a Session,
   // Exports with the same exported name (including multiple default exports) are illegal, so we don't have to worry about/handle that case.
   export_bindings: &'b mut Vec<ExportBinding<'a>>,
-  symbols: &'b mut SessionHashMap<'a, Symbol<'a>, MinifySymbol<'a>>,
+  symbols: &'b mut SessionHashMap<'a, Symbol, MinifySymbol<'a>>,
   scopes: &'b mut SessionHashMap<'a, Scope<'a>, MinifyScope<'a>>,
 }
 
@@ -606,6 +850,27 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
         // TODO Are all global/closure scopes associated with exactly one BlockStmt or TopLevel?
         if scope.typ().is_closure_or_global() {
           if let Some(min_scope) = self.scopes.get_mut(&scope) {
+            if !min_scope.hoisted_vars.is_empty() {
+              body.insert(
+                0,
+                new_node(self.session, scope, loc, Syntax::VarDecl {
+                  export: false,
+                  mode: VarDeclMode::Var,
+                  declarators: {
+                    let mut decls = self.session.new_vec();
+                    for v in min_scope.hoisted_vars.iter() {
+                      decls.push(VariableDeclarator {
+                        pattern: new_node(self.session, scope, loc, Syntax::IdentifierPattern {
+                          name: *v,
+                        }),
+                        initializer: None,
+                      })
+                    }
+                    decls
+                  },
+                }),
+              );
+            }
             for fn_decl in min_scope.hoisted_functions.values_mut() {
               // TODO Batch prepend to avoid repeated Vec shifting.
               body.insert(0, fn_decl.take(self.session));
@@ -648,7 +913,10 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
         // TODO Can this work sometimes even when `arguments` is used?
         // TODO This is still not risk-free, as the function's prototype could still be used even if there is no `this`.
         // TODO Detect `function(){}.bind(this)`, which is pretty much risk free unless somehow Function.prototype.bind has been overridden. However, any other value for the first argument of `.bind` means that it is no longer safe.
-        if !fn_scope.has_any_of_flags(ScopeFlag::UsesArguments | ScopeFlag::UsesThis) {
+        if !fn_scope
+          .flags()
+          .has_any(Flags::new() | ScopeFlag::UsesArguments | ScopeFlag::UsesThis)
+        {
           new_stx = Some(Syntax::ArrowFunctionExpr {
             // TODO
             parenthesised: true,
@@ -673,7 +941,7 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
         // TODO Can this work sometimes even when `arguments` is used?
         // TODO This is still not risk-free, as the function's prototype could still be used even if there is no `this`.
         // TODO Detect `function(){}.bind(this)`, which is pretty much risk free unless somehow Function.prototype.bind has been overridden. However, any other value for the first argument of `.bind` means that it is no longer safe.
-        if !fn_scope.has_any_of_flags(ScopeFlag::UsesArguments | ScopeFlag::UsesThis)
+        if !fn_scope.flags().has_any(Flags::new() | ScopeFlag::UsesArguments | ScopeFlag::UsesThis)
           // Use `find_symbol` as we might not be in a closure scope and the function declaration's symbol would've been added to an ancestor.
           // If no symbol is found (e.g. global), or it exists but is not `is_used_as_constructor` and not `has_prototype`, then we can safely proceed.
           && scope.find_symbol(name.loc).and_then(|sym| self.symbols.get(&sym)).filter(|sym| sym.is_used_as_constructor || sym.has_prototype).is_none()
@@ -698,7 +966,8 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
               body: body.take(self.session),
             },
           );
-          let var_decl = new_node(self.session, scope, loc, Syntax::VarDecl {
+
+          new_stx = Some(Syntax::VarDecl {
             export: false,
             // We must use `var` to have the same hoisting and shadowing semantics.
             // TODO Are there some differences e.g. reassignment, shadowing, hoisting, redeclaration, and use-before-assignment/declaration?
@@ -711,10 +980,6 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
               });
               vec
             },
-          });
-
-          new_stx = Some(Syntax::VarStmt {
-            declaration: var_decl,
           });
         }
       }
@@ -737,32 +1002,6 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
         if let Some(sym) = sym {
           let minified = self.symbols[&sym].minified_name.unwrap();
           new_stx = Some(Syntax::ClassOrFunctionName { name: minified });
-        };
-      }
-      Syntax::JsxMember {
-        base: name, path, ..
-      } => {
-        let sym = scope.find_symbol(*name);
-        if let Some(sym) = sym {
-          let minified = self.symbols[&sym].minified_name.unwrap();
-          new_stx = Some(Syntax::JsxMember {
-            base: minified,
-            path: path.clone(),
-          });
-        };
-      }
-      Syntax::JsxName {
-        name,
-        namespace: None,
-      } => {
-        let sym = scope.find_symbol(*name);
-        // TODO JsxName must be capitalised to be interpreted as a component.
-        if let Some(sym) = sym {
-          let minified = self.symbols[&sym].minified_name.unwrap();
-          new_stx = Some(Syntax::JsxName {
-            namespace: None,
-            name: minified,
-          });
         };
       }
       Syntax::ClassDecl {
@@ -843,17 +1082,15 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
         };
       }
       Syntax::ObjectMember {
-        typ: ObjectMemberType::Shorthand { name },
+        typ: ObjectMemberType::Shorthand { identifier },
       } => {
-        if scope.find_symbol(*name).is_some() {
+        let name = identifier.loc;
+        if scope.find_symbol(name).is_some() {
           // See Syntax::ObjectPatternProperty match branch.
-          let replacement_initializer_node =
-            new_node(self.session, scope, loc, Syntax::IdentifierExpr {
-              name: *name,
-            });
+          let replacement_initializer_node = identifier.take(self.session);
           new_stx = Some(Syntax::ObjectMember {
             typ: ObjectMemberType::Valued {
-              key: ClassOrObjectMemberKey::Direct(*name),
+              key: ClassOrObjectMemberKey::Direct(name),
               value: ClassOrObjectMemberValue::Property {
                 initializer: Some(replacement_initializer_node),
               },
@@ -868,13 +1105,34 @@ impl<'a, 'b> Visitor<'a> for MinifyPass<'a, 'b> {
       node.stx = new_stx;
     }
   }
+
+  fn on_syntax_up(&mut self, node: &mut NodeData<'a>) -> () {
+    match &mut node.stx {
+      Syntax::IfStmt {
+        consequent,
+        alternate,
+        ..
+      } => {
+        unwrap_block_statement_if_possible(self.session, consequent);
+        if let Some(alt) = alternate {
+          unwrap_block_statement_if_possible(self.session, alt);
+        }
+      }
+      Syntax::WhileStmt { body, .. }
+      | Syntax::DoWhileStmt { body, .. }
+      | Syntax::ForStmt { body, .. } => {
+        unwrap_block_statement_if_possible(self.session, body);
+      }
+      _ => {}
+    };
+  }
 }
 
 pub fn minify_js<'a>(session: &'a Session, top_level_node: &mut NodeData<'a>) -> () {
   let top_level_scope = top_level_node.scope;
 
   // Our custom data/state associated with a Symbol.
-  let mut symbols = session.new_hashmap::<Symbol<'a>, MinifySymbol>();
+  let mut symbols = session.new_hashmap::<Symbol, MinifySymbol>();
   // Our custom data/state associated with a Scope.
   let mut scopes = session.new_hashmap::<Scope<'a>, MinifyScope<'a>>();
   // Exports: what they refer to and what they're named.
