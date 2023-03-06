@@ -4,11 +4,14 @@ use crate::TopLevelMode;
 use parse_js::lex::Lexer;
 use parse_js::parse::Parser;
 use parse_js::session::Session;
+use parse_js::symbol::SymbolGenerator;
 
 fn check(top_level_mode: TopLevelMode, src: &str, expected: &str) -> () {
   let session = Session::new();
   let mut parser = Parser::new(Lexer::new(src.as_bytes()));
-  let node = parser.parse_top_level(&session, top_level_mode).unwrap();
+  let node = parser
+    .parse_top_level(&session, SymbolGenerator::new(), top_level_mode)
+    .unwrap();
   let mut out = Vec::new();
   minify_js(&session, node);
   emit_js(&mut out, node);
@@ -215,9 +218,9 @@ fn test_emit_jsx() {
     r#"
       import CompImp from "./comp";
 
-      let div = {a:"div"};
+      let U = {a:"div"};
 
-      const CompLocal = () => <div.a><strong/></div.a>;
+      const CompLocal = () => <U.a><strong/></U.a>;
 
       render(<CompImp><CompLocal/></CompImp>);
     "#,
