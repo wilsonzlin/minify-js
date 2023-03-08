@@ -1,5 +1,6 @@
 pub mod advanced_if;
 pub mod ctx;
+pub mod lexical_lifetimes;
 pub mod name;
 pub mod pass1;
 pub mod pass2;

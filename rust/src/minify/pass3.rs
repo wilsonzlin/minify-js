@@ -63,18 +63,8 @@ impl<'a, 'b> Pass3<'a, 'b> {
           self.visit_exported_pattern(*rest);
         }
       }
-      Syntax::ObjectPatternProperty { key, target, .. } => {
-        match target {
-          Some(target) => self.visit_exported_pattern(*target),
-          // Shorthand.
-          None => match key {
-            ClassOrObjectMemberKey::Direct(key) => self.export_bindings.push(ExportBinding {
-              target: *key,
-              alias: *key,
-            }),
-            _ => unreachable!(),
-          },
-        }
+      Syntax::ObjectPatternProperty { target, .. } => {
+        self.visit_exported_pattern(*target);
       }
       Syntax::IdentifierPattern { name } => self.export_bindings.push(ExportBinding {
         target: *name,
@@ -161,7 +151,7 @@ impl<'a, 'b> Visitor<'a> for Pass3<'a, 'b> {
         // TODO Detect `function(){}.bind(this)`, which is pretty much risk free unless somehow Function.prototype.bind has been overridden. However, any other value for the first argument of `.bind` means that it is no longer safe.
         if !fn_scope
           .flags()
-          .has_any(Flags::new() | ScopeFlag::UsesArguments | ScopeFlag::UsesThis)
+          .has_any(ScopeFlag::UsesArguments | ScopeFlag::UsesThis)
         {
           new_stx = Some(Syntax::ArrowFunctionExpr {
             // TODO
@@ -187,7 +177,7 @@ impl<'a, 'b> Visitor<'a> for Pass3<'a, 'b> {
         // TODO Can this work sometimes even when `arguments` is used?
         // TODO This is still not risk-free, as the function's prototype could still be used even if there is no `this`.
         // TODO Detect `function(){}.bind(this)`, which is pretty much risk free unless somehow Function.prototype.bind has been overridden. However, any other value for the first argument of `.bind` means that it is no longer safe.
-        if !fn_scope.flags().has_any(Flags::new() | ScopeFlag::UsesArguments | ScopeFlag::UsesThis)
+        if !fn_scope.flags().has_any(ScopeFlag::UsesArguments | ScopeFlag::UsesThis)
           // Use `find_symbol` as we might not be in a closure scope and the function declaration's symbol would've been added to an ancestor.
           // If no symbol is found (e.g. global), or it exists but is not `is_used_as_constructor` and not `has_prototype`, then we can safely proceed.
           && scope.find_symbol(name.loc).and_then(|sym| self.symbols.get(&sym)).filter(|sym| sym.is_used_as_constructor || sym.has_prototype).is_none()
@@ -311,19 +301,18 @@ impl<'a, 'b> Visitor<'a> for Pass3<'a, 'b> {
       }
       Syntax::ObjectPatternProperty {
         key: ClassOrObjectMemberKey::Direct(name),
-        target: None,
+        target,
+        shorthand: true,
         default_value,
+        ..
       } => {
         if scope.find_symbol(*name).is_some() {
           // If the symbol declaration exists, we know it definitely has a minified name. However, because the parser recurses into changed subtrees, we must simply expand this property with a IdentifierPattern target referencing the original name, so that the visitor for it will then change it to the minified name. Otherwise, we'll retrieve the minified name for a minified name, which is incorrect. Note that we can't simply skip the subtree entirely as there are still other parts.
-          let replacement_target_node =
-            new_node(self.session, scope, loc, Syntax::IdentifierPattern {
-              name: *name,
-            });
           new_stx = Some(Syntax::ObjectPatternProperty {
             key: ClassOrObjectMemberKey::Direct(*name),
-            target: Some(replacement_target_node),
+            target: target.take(self.session),
             default_value: default_value.take(),
+            shorthand: false,
           });
         };
       }

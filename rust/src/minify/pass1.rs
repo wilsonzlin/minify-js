@@ -2,6 +2,7 @@ use super::advanced_if::analyse_if_branch;
 use super::advanced_if::process_if_branch;
 use super::ctx::Ctx;
 use super::ctx::MinifyScope;
+use super::ctx::MinifySymbol;
 use parse_js::ast::new_node;
 use parse_js::ast::NodeData;
 use parse_js::ast::Syntax;
@@ -137,7 +138,12 @@ impl<'a, 'b> Visitor<'a> for Pass1<'a, 'b> {
         ..
       } if p2.as_slice() == b"prototype" => {
         if let Some(sym) = scope.find_symbol(*p1) {
-          self.ctx.symbols.entry(sym).or_default().has_prototype = true;
+          self
+            .ctx
+            .symbols
+            .entry(sym)
+            .or_insert_with(|| MinifySymbol::new(self.ctx.session))
+            .has_prototype = true;
         };
       }
       Syntax::UnaryExpr {
@@ -161,7 +167,7 @@ impl<'a, 'b> Visitor<'a> for Pass1<'a, 'b> {
               .ctx
               .symbols
               .entry(sym)
-              .or_default()
+              .or_insert_with(|| MinifySymbol::new(self.ctx.session))
               .is_used_as_constructor = true;
           };
         };
@@ -179,7 +185,7 @@ impl<'a, 'b> Visitor<'a> for Pass1<'a, 'b> {
             .ctx
             .symbols
             .entry(sym)
-            .or_default()
+            .or_insert_with(|| MinifySymbol::new(self.ctx.session))
             .is_used_as_jsx_component = true;
         };
       }

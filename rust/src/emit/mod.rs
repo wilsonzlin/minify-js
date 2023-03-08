@@ -1115,6 +1115,7 @@ fn emit_js_under_operator<'a>(
       key,
       target,
       default_value,
+      shorthand,
     } => {
       match key {
         ClassOrObjectMemberKey::Direct(name) => {
@@ -1126,9 +1127,9 @@ fn emit_js_under_operator<'a>(
           out.extend_from_slice(b"]");
         }
       };
-      if let Some(t) = target {
+      if !*shorthand {
         out.extend_from_slice(b":");
-        emit_js(out, *t);
+        emit_js(out, *target);
       };
       if let Some(v) = default_value {
         out.extend_from_slice(b"=");

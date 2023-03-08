@@ -116,7 +116,9 @@ pub fn minify_names<'a>(
   let mut next_min_name = MinifiedNameGenerator::new(session);
   for &sym_name in scope.symbol_names().iter() {
     let sym = scope.get_symbol(sym_name).unwrap();
-    let min_sym = minify_symbols.entry(sym).or_default();
+    let min_sym = minify_symbols
+      .entry(sym)
+      .or_insert_with(|| MinifySymbol::new(session));
     assert!(min_sym.minified_name.is_none());
     if min_sym.is_used_as_jsx_component {
       // We'll process these in another iteration, as there's fewer characters allowed for the identifier start, and we don't want to skip past valid identifiers for non-JSX-component names.

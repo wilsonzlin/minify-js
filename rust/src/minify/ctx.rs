@@ -1,3 +1,4 @@
+use super::lexical_lifetimes::LexicalLifetime;
 use parse_js::ast::Node;
 use parse_js::session::Session;
 use parse_js::session::SessionHashMap;
@@ -7,9 +8,10 @@ use parse_js::source::SourceRange;
 use parse_js::symbol::Identifier;
 use parse_js::symbol::Scope;
 use parse_js::symbol::Symbol;
+use std::cmp::max;
+use std::cmp::min;
 
 // Our additional state that's associated with each Symbol.
-#[derive(Default)]
 pub struct MinifySymbol<'a> {
   pub minified_name: Option<SourceRange<'a>>,
   pub is_used_as_jsx_component: bool,
@@ -18,6 +20,31 @@ pub struct MinifySymbol<'a> {
   pub is_used_as_constructor: bool,
   // Similar to `is_used_as_constructor`, although a weaker signal, since the presence of `prototype` is highly likely to mean it's a constructor function, but not as certain as `new`.
   pub has_prototype: bool,
+  pub lexical_lifetime_start: LexicalLifetime<'a>,
+  pub lexical_lifetime_end: LexicalLifetime<'a>,
+}
+
+impl<'a> MinifySymbol<'a> {
+  pub fn new(session: &'a Session) -> Self {
+    Self {
+      minified_name: None,
+      is_used_as_jsx_component: false,
+      has_usage: false,
+      is_used_as_constructor: false,
+      has_prototype: false,
+      lexical_lifetime_start: LexicalLifetime::new_infinite(session),
+      lexical_lifetime_end: LexicalLifetime::new_zero(session),
+    }
+  }
+
+  pub fn update_lifetime(&mut self, lifetime: LexicalLifetime<'a>) {
+    if lifetime < self.lexical_lifetime_start {
+      self.lexical_lifetime_start = lifetime.clone();
+    };
+    if lifetime > self.lexical_lifetime_end {
+      self.lexical_lifetime_end = lifetime.clone();
+    };
+  }
 }
 
 // Our additional state that's associated with each Scope.
@@ -53,7 +80,11 @@ impl<'a, 'b> Ctx<'a, 'b> {
     let mut cur = Some(scope);
     while let Some(scope) = cur {
       if let Some(sym) = scope.get_symbol(name) {
-        self.symbols.entry(sym).or_default().has_usage = true;
+        self
+          .symbols
+          .entry(sym)
+          .or_insert_with(|| MinifySymbol::new(self.session))
+          .has_usage = true;
         break;
       };
       self
