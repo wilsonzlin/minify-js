@@ -100,3 +100,18 @@ if (foo) {
   x = 1;
 }
 ```
+
+```js
+// Example of how usages in nested closures are unknowable and so must be infinite.
+var x = 1;
+(() => {
+  if (Math.random() < 0.5) {
+    x = 2;
+  } else {
+    setInterval(() => {
+      x++;
+    }, 1000);
+  }
+})();
+var y = 2;
+```
