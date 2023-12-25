@@ -6,7 +6,9 @@ use super::ctx::MinifySymbol;
 use parse_js::ast::new_node;
 use parse_js::ast::NodeData;
 use parse_js::ast::Syntax;
+use parse_js::operator::Operator;
 use parse_js::operator::OperatorName;
+use parse_js::session::Session;
 use parse_js::visit::JourneyControls;
 use parse_js::visit::Visitor;
 use std::str::from_utf8_unchecked;
@@ -34,56 +36,170 @@ fn stmt_has_return<'a>(stx: &Syntax<'a>) -> bool {
   }
 }
 
+// Decompose into functions for easier reasoning and testing, and more readable final top-level combined usage (i.e. `x(); y(); z()` instead of `match typ { A => { x(); y() } B => { x(); z() } C => { a() } D => { z() } }`).
+// Hope that the compiler inlines into one giant `match` instead of executing sequentially and bailing out one-after-another on the first syntax type condition of each function.
+
+// Wrap any consequent or alternate expression or non-block statement in a block (e.g. `if (x) a` => `if (x) { a; }`).
+#[inline(always)]
+fn maybe_ensure_if_statement_consequent_and_alternate_are_wrapped<'a, 'b>(
+  ctx: &mut Ctx<'a, 'b>,
+  n: &mut NodeData<'a>,
+) {
+  let Syntax::IfStmt {
+    consequent,
+    alternate,
+    ..
+  } = &mut n.stx
+  else {
+    return;
+  };
+  fn maybe_wrap<'a>(session: &'a Session, branch: &mut &mut NodeData<'a>) {
+    match &branch.stx {
+      // Already a block, don't need to do anything.
+      Syntax::BlockStmt { .. } => {}
+      _ => {
+        let inner = branch.take(session);
+        let wrapped = new_node(session, inner.scope, inner.loc, Syntax::BlockStmt {
+          body: {
+            let mut body = session.new_vec();
+            body.push(inner);
+            body
+          },
+        });
+        // Update the original node's consequent/alternate to point to the new block we've just created.
+        *branch = wrapped;
+      }
+    };
+  }
+  maybe_wrap(ctx.session, consequent);
+  if let Some(alt) = alternate {
+    maybe_wrap(ctx.session, alt);
+  }
+}
+
+#[inline(always)]
+fn maybe_combine_string_literals<'a, 'b>(ctx: &mut Ctx<'a, 'b>, n: &mut NodeData<'a>) {
+  let Syntax::BinaryExpr {
+    operator: OperatorName::Addition,
+    left: NodeData {
+      stx: Syntax::LiteralStringExpr { value: l },
+      ..
+    },
+    right: NodeData {
+      stx: Syntax::LiteralStringExpr { value: r },
+      ..
+    },
+    ..
+  } = &mut n.stx
+  else {
+    return;
+  };
+  let concat = ctx
+    .session
+    .get_allocator()
+    .alloc_slice_fill_default(l.len() + r.len());
+  concat[..l.len()].copy_from_slice(l.as_bytes());
+  concat[l.len()..].copy_from_slice(r.as_bytes());
+  n.stx = Syntax::LiteralStringExpr {
+    value: unsafe { from_utf8_unchecked(concat) },
+  };
+}
+
+#[cfg(test)]
+mod tests {
+  use super::Pass1;
+  use crate::emit;
+  use crate::minify::ctx::Ctx;
+  use crate::minify::ctx::MinifyScope;
+  use crate::minify::ctx::MinifySymbol;
+  use crate::minify::pass1::maybe_combine_string_literals;
+  use crate::minify::pass1::maybe_ensure_if_statement_consequent_and_alternate_are_wrapped;
+  use parse_js::ast::NodeData;
+  use parse_js::ast::Syntax;
+  use parse_js::parse::toplevel::TopLevelMode;
+  use parse_js::session::Session;
+  use parse_js::symbol::Scope;
+  use parse_js::symbol::Symbol;
+  use parse_js::visit::JourneyControls;
+  use parse_js::visit::Visitor;
+
+  macro_rules! setup {
+    // Rust won't expose declared vars in a macro unless we explicitly pass in their names.
+    ($n:ident, $ctx:ident, $source:expr) => {
+      let session = Session::new();
+      let $n = parse_js::parse(&session, $source.as_bytes(), TopLevelMode::Global).unwrap();
+      let mut symbols = session.new_hashmap::<Symbol, MinifySymbol>();
+      let mut scopes = session.new_hashmap::<Scope<'_>, MinifyScope<'_>>();
+      let $ctx = Ctx {
+        scopes: &mut scopes,
+        session: &session,
+        symbols: &mut symbols,
+      };
+    };
+  }
+
+  macro_rules! check {
+    ($root_node:expr, $expected:expr) => {
+      let mut out = Vec::new();
+      emit($root_node, &mut out);
+      assert_eq!($expected, std::str::from_utf8(&out).unwrap());
+    };
+  }
+
+  #[test]
+  fn test_ensure_if_statement_consequent_and_alternate_are_wrapped() {
+    struct P<'a, 'b> {
+      pub ctx: Ctx<'a, 'b>,
+    }
+    impl<'a, 'b> Visitor<'a> for P<'a, 'b> {
+      fn on_syntax_down(&mut self, n: &mut NodeData<'a>, _ctl: &mut JourneyControls) -> () {
+        maybe_ensure_if_statement_consequent_and_alternate_are_wrapped(&mut self.ctx, n);
+      }
+    }
+
+    setup!(n, ctx, "if (x) a;");
+    P { ctx }.visit(n);
+    check!(n, "if(x){a}");
+
+    setup!(n, ctx, "if (x) {} else b;");
+    P { ctx }.visit(n);
+    check!(n, "if(x){}else{b}");
+
+    setup!(n, ctx, "if (x) a; else {b}");
+    P { ctx }.visit(n);
+    check!(n, "if(x){a}else{b}");
+
+    setup!(n, ctx, "if (x) a; else b");
+    P { ctx }.visit(n);
+    check!(n, "if(x){a}else{b}");
+  }
+
+  #[test]
+  fn test_combine_string_literals() {
+    struct P<'a, 'b> {
+      pub ctx: Ctx<'a, 'b>,
+    }
+    impl<'a, 'b> Visitor<'a> for P<'a, 'b> {
+      fn on_syntax_up(&mut self, n: &mut NodeData<'a>) -> () {
+        maybe_combine_string_literals(&mut self.ctx, n);
+      }
+    }
+
+    setup!(n, ctx, "'a' + 'b';");
+    P { ctx }.visit(n);
+    check!(n, "`ab`");
+
+    setup!(n, ctx, "'a' + 'b' + 'c';");
+    P { ctx }.visit(n);
+    check!(n, "`abc`");
+  }
+}
+
 impl<'a, 'b> Visitor<'a> for Pass1<'a, 'b> {
   fn on_syntax_down(&mut self, n: &mut NodeData<'a>, _ctl: &mut JourneyControls) -> () {
     let scope = n.scope;
+    maybe_ensure_if_statement_consequent_and_alternate_are_wrapped(&mut self.ctx, n);
     match &mut n.stx {
-      Syntax::IfStmt {
-        consequent,
-        alternate,
-        ..
-      } => {
-        match &consequent.stx {
-          Syntax::BlockStmt { .. } => {}
-          _ => {
-            let inner = consequent.take(self.ctx.session);
-            let wrapped = new_node(
-              self.ctx.session,
-              inner.scope,
-              inner.loc,
-              Syntax::BlockStmt {
-                body: {
-                  let mut body = self.ctx.session.new_vec();
-                  body.push(inner);
-                  body
-                },
-              },
-            );
-            *consequent = wrapped;
-          }
-        };
-        if let Some(alt) = alternate {
-          match &alt.stx {
-            Syntax::BlockStmt { .. } => {}
-            _ => {
-              let inner = alt.take(self.ctx.session);
-              let wrapped = new_node(
-                self.ctx.session,
-                inner.scope,
-                inner.loc,
-                Syntax::BlockStmt {
-                  body: {
-                    let mut body = self.ctx.session.new_vec();
-                    body.push(inner);
-                    body
-                  },
-                },
-              );
-              *alt = wrapped;
-            }
-          }
-        }
-      }
       Syntax::BlockStmt { body } => {
         let mut i = 0;
         while i < body.len() {
@@ -197,31 +313,6 @@ impl<'a, 'b> Visitor<'a> for Pass1<'a, 'b> {
     let loc = node.loc;
     let scope = node.scope;
     match &mut node.stx {
-      Syntax::BinaryExpr {
-        operator: OperatorName::Addition,
-        left:
-          NodeData {
-            stx: Syntax::LiteralStringExpr { value: l },
-            ..
-          },
-        right:
-          NodeData {
-            stx: Syntax::LiteralStringExpr { value: r },
-            ..
-          },
-        ..
-      } => {
-        let concat = self
-          .ctx
-          .session
-          .get_allocator()
-          .alloc_slice_fill_default(l.len() + r.len());
-        concat[..l.len()].copy_from_slice(l.as_bytes());
-        concat[l.len()..].copy_from_slice(r.as_bytes());
-        node.stx = Syntax::LiteralStringExpr {
-          value: unsafe { from_utf8_unchecked(concat) },
-        };
-      }
       // This is bottom-up as we could remove nested blocks recursively.
       Syntax::BlockStmt { body } => {
         let mut returned = false;

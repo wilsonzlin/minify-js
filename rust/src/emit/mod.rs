@@ -263,6 +263,7 @@ fn emit_import_or_export_statement_trailer<'a>(
 }
 
 // NOTE: We no longer support outputting to a generic Write, as that incurs significant performance overhead (even with a BufWriter<Vec<u8>>) and our parser is not streaming anyway.
+// WARNING: We use this function for testing minification passes (it's easier than trying to write up and then match/compare trees), so all emit logic should be deterministic and not alter/deviate from the tree in any way (i.e. it's a genuine exact unopinionated/objective unmodified reflection of the tree).
 pub fn emit_js<'a>(out: &mut Vec<u8>, n: &NodeData<'a>) -> () {
   emit_js_under_operator(out, n, None);
 }

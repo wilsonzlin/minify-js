@@ -16,7 +16,7 @@ use parse_js::symbol::Scope;
 // The last form is more for normalisation: it doesn't minify much by itself (it still remains a statement), but allows a containing `if` to optimise `if (a) { b; return c } d; return e` into `return a ? (b, c) : (d, e)` if `b` and `d` can be reduced to a single expression. Otherwise, we wouldn't be able to minify the containing `if`.
 // Note that it's not possible for both branches to return, as a previous pass should have already unwrapped the unnecessary block. We also normalise it such that if only `else` returns, it's flipped, and then the `else` can be unwrapped.
 //
-// Expected normalisations:
+// Expected normalisations before performing this optimisation:
 // - Removing as many non-expression statements as possible:
 //   - Removing EmptyStmt and DebuggerStmt nodes.
 //   - Hoisting as many VarDecl nodes as possible (or even removing them if unused or optimised away e.g. lexical lifetimes).
