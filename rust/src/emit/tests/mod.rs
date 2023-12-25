@@ -298,6 +298,6 @@ fn test_advanced_if_minification() {
         }
       }
     "#,
-    r#"var foo=(a=>{if(a)return 1,2,3,4,cond?5:(6,7,8);9;10;return 11})"#,
+    r#"var foo=(a=>{var d,c;if(!a)return d=3,d;var b=1;if(cond)return c=2,c;return b})"#,
   );
 }

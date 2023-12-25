@@ -6,6 +6,6 @@ pushd "$(dirname "$0")" >/dev/null
 
 npx prettier@2.3.2 -w 'version' '.github/**/*.yaml' 'nodejs/*.{js,json,ts}'
 
-cargo fmt
+cargo +nightly fmt
 
 popd >/dev/null

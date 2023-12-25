@@ -97,7 +97,8 @@ impl<'a, 'b> LexicalLifetimesPass<'a, 'b> {
 impl<'a, 'b> Visitor<'a> for LexicalLifetimesPass<'a, 'b> {
   fn on_syntax_down(&mut self, node: &mut NodeData<'a>, ctl: &mut JourneyControls) -> () {
     let usage_scope = node.scope;
-    let Some(usage_closure_scope) = usage_scope.find_self_or_ancestor(|s| s.is_closure_or_class()) else {
+    let Some(usage_closure_scope) = usage_scope.find_self_or_ancestor(|s| s.is_closure_or_class())
+    else {
       // TODO Assert we're at the top level.
       return;
     };

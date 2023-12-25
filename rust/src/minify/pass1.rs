@@ -12,12 +12,12 @@ use parse_js::visit::Visitor;
 use std::str::from_utf8_unchecked;
 
 // - Detect all usages of JSX components, as React determines `<link>` to be the HTML tag and `<Link>` to be the variable `Link` as a component, so we cannot minify `Link` to `link` or `a0` or `bb` (i.e. make capitalised JSX elements uncapitalised).
-// - Find all references of variables so we can determine inherited variables (see `MinifiedNameGenerator` and `MinifyScope`). This is because JS allows variables to be lexically references before they're used, so we cannot do this in the same pass. For example, `let b = 1; { let a = () => b; let b = 2; }`.
+// - Find all references of variables so we can determine inherited variables (see `MinifiedNameGenerator` and `MinifyScope`). This is because JS allows variables to be lexically referenced before they're used, so we cannot do this in the same pass. For example, `let b = 1; { let a = () => b; let b = 2; }`.
 // - Find uses of `new <var>` and set `is_used_as_constructor`.
 // - Find uses of `<var>.prototype` and set `has_prototype`.
 // - Combine consecutive expression statements into one.
 // - Convert `if (x) { expr; }` to `x && expr`.
-// - Convert `if (x) { expr1; } else { expr2; }` to `x ? expr1 ; expr2`.
+// - Convert `if (x) { expr1; } else { expr2; }` to `x ? expr1 : expr2`.
 // - Concatenate addition of two literal strings.
 // - Unwrap unnecessary block statements.
 // - Drop debugger statements.

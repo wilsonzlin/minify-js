@@ -21,10 +21,9 @@ Comparison with esbuild, run on [common libraries](./bench).
 - Data is backed by a fast reusable bump allocation arena.
 - Supports JSX.
 - Analyses scopes and variable visibilities.
-- Minification of identifiers.
+- Minifies identifiers.
 - Omits semicolons, spaces, parentheses, and braces where possible.
 - Transforms functions to arrow functions when `new`, `this`, `arguments`, and `prototype` aren't used.
-- Moves repeated usages of constants to one shared variable.
 - Transforms `if` statements to expressions.
 
 ## Usage
