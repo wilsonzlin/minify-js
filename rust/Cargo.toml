@@ -15,7 +15,7 @@ version = "0.6.0"
 [dependencies]
 aho-corasick = "0.7"
 lazy_static = "1.4"
-parse-js = "0.20.1"
+parse-js = "0.21"
 
 [features]
 serialize = ["parse-js/serialize"]

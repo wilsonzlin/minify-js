@@ -966,13 +966,14 @@ fn emit_js_under_operator<'a>(
       };
     }
     Syntax::ForStmt { header, body } => {
-      out.extend_from_slice(b"for(");
+      out.extend_from_slice(b"for");
       match header {
         ForStmtHeader::Three {
           init,
           condition,
           post,
         } => {
+          out.extend_from_slice(b"(");
           match init {
             ForThreeInit::None => {}
             ForThreeInit::Expression(n) | ForThreeInit::Declaration(n) => emit_js(out, *n),
@@ -986,7 +987,16 @@ fn emit_js_under_operator<'a>(
             emit_js(out, *n);
           };
         }
-        ForStmtHeader::InOf { of, lhs, rhs } => {
+        ForStmtHeader::InOf {
+          of,
+          lhs,
+          rhs,
+          await_,
+        } => {
+          if *await_ {
+            out.extend_from_slice(b" await");
+          }
+          out.extend_from_slice(b"(");
           match lhs {
             ForInOfStmtHeaderLhs::Declaration(n) | ForInOfStmtHeaderLhs::Pattern(n) => {
               emit_js(out, *n);
