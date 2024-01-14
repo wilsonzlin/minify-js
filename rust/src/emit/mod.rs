@@ -1,114 +1,108 @@
+use ahash::AHashMap;
 use aho_corasick::AhoCorasick;
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use parse_js::ast::ArrayElement;
-use parse_js::ast::ClassMember;
 use parse_js::ast::ClassOrObjectMemberKey;
 use parse_js::ast::ClassOrObjectMemberValue;
 use parse_js::ast::ExportNames;
-use parse_js::ast::ForInOfStmtHeaderLhs;
-use parse_js::ast::ForStmtHeader;
-use parse_js::ast::ForThreeInit;
+use parse_js::ast::ForInit;
 use parse_js::ast::LiteralTemplatePart;
-use parse_js::ast::NodeData;
+use parse_js::ast::Node;
 use parse_js::ast::ObjectMemberType;
 use parse_js::ast::Syntax;
 use parse_js::ast::VarDeclMode;
 use parse_js::operator::OperatorName;
 use parse_js::operator::OPERATORS;
-use parse_js::session::SessionVec;
-use std::collections::HashMap;
 use std::io::Write;
 
 #[cfg(test)]
 mod tests;
 
-lazy_static! {
-  pub static ref BINARY_OPERATOR_SYNTAX: HashMap<OperatorName, &'static str> = {
-      let mut map = HashMap::<OperatorName, &'static str>::new();
-      // Excluded: Call, Conditional.
-      map.insert(OperatorName::Addition, "+");
-      map.insert(OperatorName::Assignment, "=");
-      map.insert(OperatorName::AssignmentAddition, "+=");
-      map.insert(OperatorName::AssignmentBitwiseAnd, "&=");
-      map.insert(OperatorName::AssignmentBitwiseLeftShift, "<<=");
-      map.insert(OperatorName::AssignmentBitwiseOr, "|=");
-      map.insert(OperatorName::AssignmentBitwiseRightShift, ">>=");
-      map.insert(OperatorName::AssignmentBitwiseUnsignedRightShift, ">>>=");
-      map.insert(OperatorName::AssignmentBitwiseXor, "^=");
-      map.insert(OperatorName::AssignmentDivision, "/=");
-      map.insert(OperatorName::AssignmentExponentiation, "**=");
-      map.insert(OperatorName::AssignmentLogicalAnd, "&&=");
-      map.insert(OperatorName::AssignmentLogicalOr, "||=");
-      map.insert(OperatorName::AssignmentMultiplication, "*=");
-      map.insert(OperatorName::AssignmentNullishCoalescing, "??=");
-      map.insert(OperatorName::AssignmentRemainder, "%=");
-      map.insert(OperatorName::AssignmentSubtraction, "-=");
-      map.insert(OperatorName::BitwiseAnd, "&");
-      map.insert(OperatorName::BitwiseLeftShift, "<<");
-      map.insert(OperatorName::BitwiseOr, "|");
-      map.insert(OperatorName::BitwiseRightShift, ">>");
-      map.insert(OperatorName::BitwiseUnsignedRightShift, ">>>");
-      map.insert(OperatorName::BitwiseXor, "^");
-      map.insert(OperatorName::Comma, ",");
-      map.insert(OperatorName::Division, "/");
-      map.insert(OperatorName::Equality, "==");
-      map.insert(OperatorName::Exponentiation, "**");
-      map.insert(OperatorName::GreaterThan, ">");
-      map.insert(OperatorName::GreaterThanOrEqual, ">=");
-      map.insert(OperatorName::In, " in ");
-      map.insert(OperatorName::Inequality, "!=");
-      map.insert(OperatorName::Instanceof, " instanceof ");
-      map.insert(OperatorName::LessThan, "<");
-      map.insert(OperatorName::LessThanOrEqual, "<=");
-      map.insert(OperatorName::LogicalAnd, "&&");
-      map.insert(OperatorName::LogicalOr, "||");
-      map.insert(OperatorName::MemberAccess, ".");
-      map.insert(OperatorName::Multiplication, "*");
-      map.insert(OperatorName::NullishCoalescing, "??");
-      map.insert(OperatorName::OptionalChainingMemberAccess, "?.");
-      map.insert(OperatorName::OptionalChainingComputedMemberAccess, "?.[");
-      map.insert(OperatorName::OptionalChainingCall, "?.(");
-      map.insert(OperatorName::Remainder, "%");
-      map.insert(OperatorName::StrictEquality, "===");
-      map.insert(OperatorName::StrictInequality, "!==");
-      map.insert(OperatorName::Subtraction, "-");
-      map.insert(OperatorName::Typeof, " typeof ");
-      map
-  };
+pub static BINARY_OPERATOR_SYNTAX: Lazy<AHashMap<OperatorName, &'static str>> = Lazy::new(|| {
+    let mut map = AHashMap::<OperatorName, &'static str>::new();
+    // Excluded: Call, Conditional.
+    map.insert(OperatorName::Addition, "+");
+    map.insert(OperatorName::Assignment, "=");
+    map.insert(OperatorName::AssignmentAddition, "+=");
+    map.insert(OperatorName::AssignmentBitwiseAnd, "&=");
+    map.insert(OperatorName::AssignmentBitwiseLeftShift, "<<=");
+    map.insert(OperatorName::AssignmentBitwiseOr, "|=");
+    map.insert(OperatorName::AssignmentBitwiseRightShift, ">>=");
+    map.insert(OperatorName::AssignmentBitwiseUnsignedRightShift, ">>>=");
+    map.insert(OperatorName::AssignmentBitwiseXor, "^=");
+    map.insert(OperatorName::AssignmentDivision, "/=");
+    map.insert(OperatorName::AssignmentExponentiation, "**=");
+    map.insert(OperatorName::AssignmentLogicalAnd, "&&=");
+    map.insert(OperatorName::AssignmentLogicalOr, "||=");
+    map.insert(OperatorName::AssignmentMultiplication, "*=");
+    map.insert(OperatorName::AssignmentNullishCoalescing, "??=");
+    map.insert(OperatorName::AssignmentRemainder, "%=");
+    map.insert(OperatorName::AssignmentSubtraction, "-=");
+    map.insert(OperatorName::BitwiseAnd, "&");
+    map.insert(OperatorName::BitwiseLeftShift, "<<");
+    map.insert(OperatorName::BitwiseOr, "|");
+    map.insert(OperatorName::BitwiseRightShift, ">>");
+    map.insert(OperatorName::BitwiseUnsignedRightShift, ">>>");
+    map.insert(OperatorName::BitwiseXor, "^");
+    map.insert(OperatorName::Comma, ",");
+    map.insert(OperatorName::Division, "/");
+    map.insert(OperatorName::Equality, "==");
+    map.insert(OperatorName::Exponentiation, "**");
+    map.insert(OperatorName::GreaterThan, ">");
+    map.insert(OperatorName::GreaterThanOrEqual, ">=");
+    map.insert(OperatorName::In, " in ");
+    map.insert(OperatorName::Inequality, "!=");
+    map.insert(OperatorName::Instanceof, " instanceof ");
+    map.insert(OperatorName::LessThan, "<");
+    map.insert(OperatorName::LessThanOrEqual, "<=");
+    map.insert(OperatorName::LogicalAnd, "&&");
+    map.insert(OperatorName::LogicalOr, "||");
+    map.insert(OperatorName::MemberAccess, ".");
+    map.insert(OperatorName::Multiplication, "*");
+    map.insert(OperatorName::NullishCoalescing, "??");
+    map.insert(OperatorName::OptionalChainingMemberAccess, "?.");
+    map.insert(OperatorName::OptionalChainingComputedMemberAccess, "?.[");
+    map.insert(OperatorName::OptionalChainingCall, "?.(");
+    map.insert(OperatorName::Remainder, "%");
+    map.insert(OperatorName::StrictEquality, "===");
+    map.insert(OperatorName::StrictInequality, "!==");
+    map.insert(OperatorName::Subtraction, "-");
+    map.insert(OperatorName::Typeof, " typeof ");
+    map
+});
 
-  pub static ref UNARY_OPERATOR_SYNTAX: HashMap<OperatorName, &'static str> = {
-      let mut map = HashMap::<OperatorName, &'static str>::new();
-      // Excluded: Postfix{Increment,Decrement}.
-      map.insert(OperatorName::Await, "await ");
-      map.insert(OperatorName::BitwiseNot, "~");
-      map.insert(OperatorName::Delete, "delete ");
-      map.insert(OperatorName::LogicalNot, "!");
-      map.insert(OperatorName::New, "new ");
-      map.insert(OperatorName::PrefixDecrement, "--");
-      map.insert(OperatorName::PrefixIncrement, "++");
-      map.insert(OperatorName::Typeof, "typeof ");
-      map.insert(OperatorName::UnaryNegation, "-");
-      map.insert(OperatorName::UnaryPlus, "+");
-      map.insert(OperatorName::Void, "void ");
-      map.insert(OperatorName::Yield, "yield ");
-      map.insert(OperatorName::YieldDelegated, "yield*");
-      map
-  };
+pub static UNARY_OPERATOR_SYNTAX: Lazy<AHashMap<OperatorName, &'static str>> = Lazy::new(|| {
+    let mut map = AHashMap::<OperatorName, &'static str>::new();
+    // Excluded: Postfix{Increment,Decrement}.
+    map.insert(OperatorName::Await, "await ");
+    map.insert(OperatorName::BitwiseNot, "~");
+    map.insert(OperatorName::Delete, "delete ");
+    map.insert(OperatorName::LogicalNot, "!");
+    map.insert(OperatorName::New, "new ");
+    map.insert(OperatorName::PrefixDecrement, "--");
+    map.insert(OperatorName::PrefixIncrement, "++");
+    map.insert(OperatorName::Typeof, "typeof ");
+    map.insert(OperatorName::UnaryNegation, "-");
+    map.insert(OperatorName::UnaryPlus, "+");
+    map.insert(OperatorName::Void, "void ");
+    map.insert(OperatorName::Yield, "yield ");
+    map.insert(OperatorName::YieldDelegated, "yield*");
+    map
+});
 
-  static ref TEMPLATE_LITERAL_ESCAPE_MAT: AhoCorasick = AhoCorasick::new(&[
-    b"\\",
-    b"`",
-    b"$",
-  ]);
-}
+static TEMPLATE_LITERAL_ESCAPE_MAT: Lazy<AhoCorasick> = Lazy::new(|| AhoCorasick::new(&[
+  b"\\",
+  b"`",
+  b"$",
+]));
 
 const TEMPLATE_LITERAL_ESCAPE_REP: &[&[u8]] = &[b"\\\\", b"\\`", b"\\$"];
 
 // Returns whether or not the value is a property.
-fn emit_class_or_object_member<'a>(
+fn emit_class_or_object_member(
   out: &mut Vec<u8>,
-  key: &'a ClassOrObjectMemberKey,
-  value: &'a ClassOrObjectMemberValue,
+  key: &ClassOrObjectMemberKey,
+  value: &ClassOrObjectMemberValue,
   value_delimiter: &'static [u8],
 ) -> bool {
   let is_computed_key = match key {
@@ -146,26 +140,26 @@ fn emit_class_or_object_member<'a>(
   };
   match key {
     ClassOrObjectMemberKey::Direct(name) => {
-      out.extend_from_slice(name.as_slice());
+      out.extend_from_slice(name.as_bytes());
     }
     ClassOrObjectMemberKey::Computed(expr) => {
       out.extend_from_slice(b"[");
-      emit_js(out, *expr);
+      emit_js(out, expr);
       out.extend_from_slice(b"]");
     }
   };
   match value {
     ClassOrObjectMemberValue::Getter { body } => {
       out.extend_from_slice(b"()");
-      emit_js(out, *body);
+      emit_js(out, body);
     }
     ClassOrObjectMemberValue::Method {
       signature, body, ..
     } => {
       out.extend_from_slice(b"(");
-      emit_js(out, *signature);
+      emit_js(out, signature);
       out.extend_from_slice(b")");
-      emit_js(out, *body);
+      emit_js(out, body);
     }
     ClassOrObjectMemberValue::Property { initializer } => {
       if let Some(v) = initializer {
@@ -174,7 +168,7 @@ fn emit_class_or_object_member<'a>(
         if is_comma {
           out.extend_from_slice(b"(");
         };
-        emit_js(out, *v);
+        emit_js(out, v);
         if is_comma {
           out.extend_from_slice(b")");
         };
@@ -182,9 +176,9 @@ fn emit_class_or_object_member<'a>(
     }
     ClassOrObjectMemberValue::Setter { body, parameter } => {
       out.extend_from_slice(b"(");
-      emit_js(out, *parameter);
+      emit_js(out, parameter);
       out.extend_from_slice(b")");
-      emit_js(out, *body);
+      emit_js(out, body);
     }
   };
 
@@ -194,11 +188,11 @@ fn emit_class_or_object_member<'a>(
   }
 }
 
-fn emit_class<'a>(
+fn emit_class(
   out: &mut Vec<u8>,
-  name: &Option<&mut NodeData<'a>>,
-  extends: &Option<&mut NodeData<'a>>,
-  members: &SessionVec<'a, ClassMember<'a>>,
+  name: Option<&Node>,
+  extends: Option<&Node>,
+  members: &[Node], // Always ClassMember.
 ) -> () {
   out.extend_from_slice(b"class");
   if let Some(n) = name {
@@ -212,28 +206,31 @@ fn emit_class<'a>(
   out.extend_from_slice(b"{");
   let mut last_member_was_property = false;
   for (i, m) in members.iter().enumerate() {
+    let Syntax::ClassMember { key, static_, value } = m.stx.as_ref() else {
+      unreachable!();
+    };
     if i > 0 && last_member_was_property {
       out.extend_from_slice(b";");
     }
-    if m.statik {
+    if *static_ {
       out.extend_from_slice(b"static ");
     }
-    last_member_was_property = emit_class_or_object_member(out, &m.key, &m.value, b"=");
+    last_member_was_property = emit_class_or_object_member(out, key, value, b"=");
   }
   out.extend_from_slice(b"}");
 }
 
-fn emit_import_or_export_statement_trailer<'a>(
+fn emit_import_or_export_statement_trailer(
   out: &mut Vec<u8>,
-  names: Option<&ExportNames<'a>>,
-  from: Option<&'a str>,
+  names: Option<&ExportNames>,
+  from: Option<&String>,
 ) -> () {
   match names {
     Some(ExportNames::All(alias)) => {
       out.extend_from_slice(b"*");
       if let Some(alias) = alias {
         out.extend_from_slice(b"as ");
-        emit_js(out, *alias);
+        emit_js(out, alias);
         if from.is_some() {
           out.extend_from_slice(b" ");
         }
@@ -245,10 +242,10 @@ fn emit_import_or_export_statement_trailer<'a>(
         if i > 0 {
           out.extend_from_slice(b",");
         }
-        out.extend_from_slice(e.target.as_slice());
+        out.extend_from_slice(e.target.as_bytes());
         // TODO Omit if identical to `target`.
         out.extend_from_slice(b" as ");
-        emit_js(out, e.alias);
+        emit_js(out, &e.alias);
       }
       out.extend_from_slice(b"}");
     }
@@ -263,8 +260,7 @@ fn emit_import_or_export_statement_trailer<'a>(
 }
 
 // NOTE: We no longer support outputting to a generic Write, as that incurs significant performance overhead (even with a BufWriter<Vec<u8>>) and our parser is not streaming anyway.
-// WARNING: We use this function for testing minification passes (it's easier than trying to write up and then match/compare trees), so all emit logic should be deterministic and not alter/deviate from the tree in any way (i.e. it's a genuine exact unopinionated/objective unmodified reflection of the tree).
-pub fn emit_js<'a>(out: &mut Vec<u8>, n: &NodeData<'a>) -> () {
+pub(crate) fn emit_js(out: &mut Vec<u8>, n: &Node) -> () {
   emit_js_under_operator(out, n, None);
 }
 
@@ -275,17 +271,17 @@ enum LeafNodeType {
   Block,
 }
 
-fn get_leaf_node_type<'a>(n: &NodeData<'a>) -> LeafNodeType {
-  match &n.stx {
-    Syntax::WhileStmt { body, .. } | Syntax::ForStmt { body, .. } => get_leaf_node_type(*body),
-    Syntax::LabelStmt { statement, .. } => get_leaf_node_type(*statement),
+fn get_leaf_node_type(n: &Node) -> LeafNodeType {
+  match n.stx.as_ref() {
+    Syntax::WhileStmt { body, .. } | Syntax::ForStmt { body, .. } => get_leaf_node_type(body),
+    Syntax::LabelStmt { statement, .. } => get_leaf_node_type(statement),
     Syntax::IfStmt {
       consequent,
       alternate,
       ..
     } => match alternate {
-      Some(n) => get_leaf_node_type(*n),
-      None => get_leaf_node_type(*consequent),
+      Some(n) => get_leaf_node_type(n),
+      None => get_leaf_node_type(consequent),
     },
     Syntax::BlockStmt { .. } => LeafNodeType::Block,
     Syntax::EmptyStmt {} => LeafNodeType::EmptyStmt,
@@ -298,15 +294,15 @@ fn get_leaf_node_type<'a>(n: &NodeData<'a>) -> LeafNodeType {
 // It's important to use this function:
 // - Omit semicolons where possible.
 // - Insert semicolon after last statement if its leaf is a `if`, `for`, `while`, or `with` statement with an empty statement as its body e.g. `if (x) label: for (;;) while (x)` but not `if (x) for (;;) label: while (x) {}` or `if (x) for (;;) label: while (x) return`.
-fn emit_statements<'a>(out: &mut Vec<u8>, statements: &[&mut NodeData<'a>]) -> () {
+fn emit_statements(out: &mut Vec<u8>, statements: &[Node]) -> () {
   // Since we skip over some statements, the last actual statement may not be the last in the list.
-  let mut last_statement: Option<&NodeData<'a>> = None;
+  let mut last_statement: Option<&Node> = None;
   for n in statements {
-    if let Syntax::EmptyStmt {} = n.stx {
+    if let Syntax::EmptyStmt {} = n.stx.as_ref() {
       continue;
     };
     if let Some(n) = last_statement {
-      match &n.stx {
+      match n.stx.as_ref() {
         Syntax::BlockStmt { .. }
         | Syntax::ClassDecl { .. }
         | Syntax::EmptyStmt {}
@@ -316,8 +312,8 @@ fn emit_statements<'a>(out: &mut Vec<u8>, statements: &[&mut NodeData<'a>]) -> (
         _ => out.extend_from_slice(b";"),
       }
     }
-    emit_js(out, *n);
-    last_statement = Some(*n);
+    emit_js(out, n);
+    last_statement = Some(n);
   }
   if let Some(n) = last_statement {
     if get_leaf_node_type(n) == LeafNodeType::EmptyStmt {
@@ -326,14 +322,14 @@ fn emit_statements<'a>(out: &mut Vec<u8>, statements: &[&mut NodeData<'a>]) -> (
   }
 }
 
-fn is_comma_expression<'a>(stx: &Syntax<'a>) -> bool {
+fn is_comma_expression(stx: &Syntax) -> bool {
   match stx {
     Syntax::BinaryExpr { operator, .. } => *operator == OperatorName::Comma,
     _ => false,
   }
 }
 
-fn leftmost_expression<'a, 'b>(stx: &'b Syntax<'a>) -> &'b Syntax<'a> {
+fn leftmost_expression(stx: &Syntax) -> &Syntax {
   match stx {
     Syntax::ComputedMemberExpr { object, .. } => leftmost_expression(&object.stx),
     Syntax::MemberExpr { left, .. } | Syntax::BinaryExpr { left, .. } => {
@@ -359,20 +355,37 @@ For `do <stmt> while (...)` and `if <stmt> else (...)`, when does a semicolon ne
 - do for (;;) while (y) if (z) {} while (a);
 */
 
-fn emit_js_under_operator<'a>(
+fn emit_js_under_operator(
   out: &mut Vec<u8>,
-  node: &NodeData<'a>,
+  node: &Node,
   parent_operator_precedence: Option<u8>,
 ) -> () {
-  match &node.stx {
+  match node.stx.as_ref() {
     Syntax::EmptyStmt {} => {}
-    Syntax::LiteralBigIntExpr { .. } => {
-      // TODO This is invalid as `loc` may not be valid (e.g. newly created node during transform).
-      out.extend_from_slice(node.loc.as_slice());
+    Syntax::TaggedTemplateExpr { function, parts } => {
+      emit_js(out, &function);
+      // TODO Combine with Syntax::LiteralTemplateExpr branch.
+      out.extend_from_slice(b"`");
+      for p in parts {
+        match p {
+          LiteralTemplatePart::Substitution(sub) => {
+            out.extend_from_slice(b"${");
+            emit_js(out, sub);
+            out.extend_from_slice(b"}");
+          }
+          LiteralTemplatePart::String(str) => {
+            // TODO Escape.
+            out.extend_from_slice(str.as_bytes());
+          }
+        }
+      }
+      out.extend_from_slice(b"`");
     }
-    Syntax::LiteralRegexExpr { .. } => {
-      // TODO This is invalid as `loc` may not be valid (e.g. newly created node during transform).
-      out.extend_from_slice(node.loc.as_slice());
+    Syntax::LiteralBigIntExpr { value } => {
+      out.extend_from_slice(value.as_bytes());
+    }
+    Syntax::LiteralRegexExpr { value } => {
+      out.extend_from_slice(value.as_bytes());
     }
     Syntax::LiteralBooleanExpr { value } => {
       match *value {
@@ -393,12 +406,13 @@ fn emit_js_under_operator<'a>(
       out.extend_from_slice(b"`");
     }
     Syntax::LiteralTemplateExpr { parts } => {
+      // TODO Combine with Syntax::TaggedTemplateExpr branch.
       out.extend_from_slice(b"`");
       for p in parts {
         match p {
           LiteralTemplatePart::Substitution(sub) => {
             out.extend_from_slice(b"${");
-            emit_js(out, *sub);
+            emit_js(out, sub);
             out.extend_from_slice(b"}");
           }
           LiteralTemplatePart::String(str) => {
@@ -423,17 +437,17 @@ fn emit_js_under_operator<'a>(
         if i > 0 {
           out.extend_from_slice(b",");
         }
-        emit_js(out, decl.pattern);
+        emit_js(out, &decl.pattern);
         if let Some(expr) = &decl.initializer {
           out.extend_from_slice(b"=");
           // This is only really done for the Comma operator, which is the only operator below Assignment.
           let operator = &OPERATORS[&OperatorName::Assignment];
-          emit_js_under_operator(out, *expr, Some(operator.precedence));
+          emit_js_under_operator(out, expr, Some(operator.precedence));
         };
       }
     }
     Syntax::IdentifierPattern { name } => {
-      out.extend_from_slice(name.as_slice());
+      out.extend_from_slice(name.as_bytes());
     }
     Syntax::ArrayPattern { elements, rest } => {
       out.extend_from_slice(b"[");
@@ -442,10 +456,10 @@ fn emit_js_under_operator<'a>(
           out.extend_from_slice(b",");
         }
         if let Some(e) = e {
-          emit_js(out, e.target);
+          emit_js(out, &e.target);
           if let Some(v) = &e.default_value {
             out.extend_from_slice(b"=");
-            emit_js(out, *v);
+            emit_js(out, v);
           }
         };
       }
@@ -454,7 +468,7 @@ fn emit_js_under_operator<'a>(
           out.extend_from_slice(b",");
         }
         out.extend_from_slice(b"...");
-        emit_js(out, *r);
+        emit_js(out, r);
       };
       out.extend_from_slice(b"]");
     }
@@ -464,26 +478,26 @@ fn emit_js_under_operator<'a>(
         if i > 0 {
           out.extend_from_slice(b",");
         }
-        emit_js(out, *e);
+        emit_js(out, e);
       }
       if let Some(r) = rest {
         if !properties.is_empty() {
           out.extend_from_slice(b",");
         }
         out.extend_from_slice(b"...");
-        emit_js(out, *r);
+        emit_js(out, r);
       };
       out.extend_from_slice(b"}");
     }
     Syntax::ClassOrFunctionName { name } => {
-      out.extend_from_slice(name.as_slice());
+      out.extend_from_slice(name.as_bytes());
     }
     Syntax::FunctionSignature { parameters } => {
       for (i, p) in parameters.iter().enumerate() {
         if i > 0 {
           out.extend_from_slice(b",");
         };
-        emit_js(out, *p);
+        emit_js(out, p);
       }
     }
     Syntax::ClassDecl {
@@ -499,7 +513,7 @@ fn emit_js_under_operator<'a>(
         debug_assert!(*export_default);
         out.extend_from_slice(b"export default ");
       }
-      emit_class(out, name, extends, members);
+      emit_class(out, name.as_ref(), extends.as_ref(), members.as_slice());
     }
     Syntax::FunctionDecl {
       export,
@@ -526,12 +540,12 @@ fn emit_js_under_operator<'a>(
         out.extend_from_slice(b" ");
       };
       if let Some(name) = name {
-        emit_js(out, *name);
+        emit_js(out, name);
       }
       out.extend_from_slice(b"(");
-      emit_js(out, *signature);
+      emit_js(out, signature);
       out.extend_from_slice(b")");
-      emit_js(out, *body);
+      emit_js(out, body);
     }
     Syntax::ParamDecl {
       rest,
@@ -541,10 +555,10 @@ fn emit_js_under_operator<'a>(
       if *rest {
         out.extend_from_slice(b"...");
       };
-      emit_js(out, *pattern);
+      emit_js(out, pattern);
       if let Some(v) = default_value {
         out.extend_from_slice(b"=");
-        emit_js(out, *v);
+        emit_js(out, v);
       }
     }
     Syntax::ArrowFunctionExpr {
@@ -561,10 +575,10 @@ fn emit_js_under_operator<'a>(
       if *is_async {
         out.extend_from_slice(b"async");
       }
-      let can_omit_parentheses = if let Syntax::FunctionSignature { parameters } = &signature.stx {
+      let can_omit_parentheses = if let Syntax::FunctionSignature { parameters } = signature.stx.as_ref() {
         !is_async
           && parameters.len() == 1
-          && match &parameters[0].stx {
+          && match parameters[0].stx.as_ref() {
             Syntax::ParamDecl {
               default_value,
               pattern,
@@ -572,7 +586,7 @@ fn emit_js_under_operator<'a>(
             } => {
               !rest
                 && default_value.is_none()
-                && match &pattern.stx {
+                && match pattern.stx.as_ref() {
                   Syntax::IdentifierPattern { .. } => true,
                   _ => false,
                 }
@@ -585,7 +599,7 @@ fn emit_js_under_operator<'a>(
       if !can_omit_parentheses {
         out.extend_from_slice(b"(");
       };
-      emit_js(out, *signature);
+      emit_js(out, signature);
       if !can_omit_parentheses {
         out.extend_from_slice(b")");
       };
@@ -602,7 +616,7 @@ fn emit_js_under_operator<'a>(
       if must_parenthesise_body {
         out.extend_from_slice(b"(");
       };
-      emit_js(out, *body);
+      emit_js(out, body);
       if must_parenthesise_body {
         out.extend_from_slice(b")");
       };
@@ -629,7 +643,7 @@ fn emit_js_under_operator<'a>(
       if must_parenthesise {
         out.extend_from_slice(b"(");
       };
-      emit_js_under_operator(out, *left, Some(operator.precedence));
+      emit_js_under_operator(out, left, Some(operator.precedence));
       out.extend_from_slice(
         BINARY_OPERATOR_SYNTAX
           .get(operator_name)
@@ -644,7 +658,7 @@ fn emit_js_under_operator<'a>(
         }
         _ => {}
       };
-      emit_js_under_operator(out, *right, Some(operator.precedence));
+      emit_js_under_operator(out, right, Some(operator.precedence));
       if must_parenthesise {
         out.extend_from_slice(b")");
       };
@@ -667,7 +681,7 @@ fn emit_js_under_operator<'a>(
       if must_parenthesise {
         out.extend_from_slice(b"(");
       }
-      emit_js_under_operator(out, *callee, Some(operator.precedence));
+      emit_js_under_operator(out, callee, Some(operator.precedence));
       if *optional_chaining {
         out.extend_from_slice(b"?.");
       }
@@ -676,7 +690,7 @@ fn emit_js_under_operator<'a>(
         if i > 0 {
           out.extend_from_slice(b",");
         }
-        emit_js(out, *a);
+        emit_js(out, a);
       }
       out.extend_from_slice(b")");
       // TODO Omit parentheses if possible.
@@ -699,11 +713,11 @@ fn emit_js_under_operator<'a>(
       if must_parenthesise {
         out.extend_from_slice(b"(");
       };
-      emit_js_under_operator(out, *test, Some(operator.precedence));
+      emit_js_under_operator(out, test, Some(operator.precedence));
       out.extend_from_slice(b"?");
-      emit_js_under_operator(out, *consequent, Some(operator.precedence));
+      emit_js_under_operator(out, consequent, Some(operator.precedence));
       out.extend_from_slice(b":");
-      emit_js_under_operator(out, *alternate, Some(operator.precedence));
+      emit_js_under_operator(out, alternate, Some(operator.precedence));
       if must_parenthesise {
         out.extend_from_slice(b")");
       };
@@ -732,33 +746,33 @@ fn emit_js_under_operator<'a>(
         if !generator {
           out.extend_from_slice(b" ");
         };
-        emit_js(out, *name);
+        emit_js(out, name);
       };
       out.extend_from_slice(b"(");
-      emit_js(out, *signature);
+      emit_js(out, signature);
       out.extend_from_slice(b")");
-      emit_js(out, *body);
+      emit_js(out, body);
       // TODO Omit parentheses if possible.
       if *parenthesised {
         out.extend_from_slice(b")");
       }
     }
     Syntax::IdentifierExpr { name } => {
-      out.extend_from_slice(name.as_slice());
+      out.extend_from_slice(name.as_bytes());
     }
     Syntax::ImportExpr { module } => {
       out.extend_from_slice(b"import(");
-      emit_js(out, *module);
+      emit_js(out, module);
       out.extend_from_slice(b")");
     }
     Syntax::ImportMeta {} => {
       out.extend_from_slice(b"import.meta");
     }
     Syntax::JsxAttribute { name, value } => {
-      emit_js(out, *name);
+      emit_js(out, name);
       if let Some(value) = value {
         out.extend_from_slice(b"=");
-        emit_js(out, *value);
+        emit_js(out, value);
       }
     }
     Syntax::JsxElement {
@@ -768,52 +782,52 @@ fn emit_js_under_operator<'a>(
     } => {
       out.extend_from_slice(b"<");
       if let Some(name) = name {
-        emit_js(out, *name);
+        emit_js(out, name);
       }
       for attr in attributes {
         out.extend_from_slice(b" ");
-        emit_js(out, *attr);
+        emit_js(out, attr);
       }
       if children.is_empty() {
         out.extend_from_slice(b"/>");
       } else {
         out.extend_from_slice(b">");
         for child in children {
-          emit_js(out, *child);
+          emit_js(out, child);
         }
         out.extend_from_slice(b"</");
         if let Some(name) = name {
-          emit_js(out, *name);
+          emit_js(out, name);
         }
         out.extend_from_slice(b">");
       }
     }
     Syntax::JsxExpressionContainer { value } => {
       out.extend_from_slice(b"{");
-      emit_js(out, *value);
+      emit_js(out, value);
       out.extend_from_slice(b"}");
     }
     Syntax::JsxMemberExpression { base, path } => {
-      emit_js(out, *base);
+      emit_js(out, base);
       for c in path {
         out.extend_from_slice(b".");
-        out.extend_from_slice(c.as_slice());
+        out.extend_from_slice(c.as_bytes());
       }
     }
     Syntax::JsxName { namespace, name } => {
       if let Some(namespace) = namespace {
-        out.extend_from_slice(namespace.as_slice());
+        out.extend_from_slice(namespace.as_bytes());
         out.extend_from_slice(b":");
       }
-      out.extend_from_slice(name.as_slice());
+      out.extend_from_slice(name.as_bytes());
     }
     Syntax::JsxSpreadAttribute { value } => {
       out.extend_from_slice(b"{...");
-      emit_js(out, *value);
+      emit_js(out, value);
       out.extend_from_slice(b"}");
     }
     Syntax::JsxText { value } => {
-      out.extend_from_slice(value.as_slice());
+      out.extend_from_slice(value.as_bytes());
     }
     Syntax::LiteralArrayExpr { elements } => {
       out.extend_from_slice(b"[");
@@ -823,11 +837,11 @@ fn emit_js_under_operator<'a>(
         };
         match e {
           ArrayElement::Single(expr) => {
-            emit_js(out, *expr);
+            emit_js(out, expr);
           }
           ArrayElement::Rest(expr) => {
             out.extend_from_slice(b"...");
-            emit_js(out, *expr);
+            emit_js(out, expr);
           }
           ArrayElement::Empty => {}
         };
@@ -840,7 +854,7 @@ fn emit_js_under_operator<'a>(
         if i > 0 {
           out.extend_from_slice(b",");
         }
-        emit_js(out, *e);
+        emit_js(out, e);
       }
       out.extend_from_slice(b"}");
     }
@@ -862,7 +876,7 @@ fn emit_js_under_operator<'a>(
         out.extend_from_slice(b"(");
       };
       out.extend_from_slice(UNARY_OPERATOR_SYNTAX.get(operator_name).unwrap().as_bytes());
-      emit_js_under_operator(out, *argument, Some(operator.precedence));
+      emit_js_under_operator(out, argument, Some(operator.precedence));
       if must_parenthesise {
         out.extend_from_slice(b")");
       };
@@ -881,7 +895,7 @@ fn emit_js_under_operator<'a>(
       if must_parenthesise {
         out.extend_from_slice(b"(");
       };
-      emit_js_under_operator(out, *argument, Some(operator.precedence));
+      emit_js_under_operator(out, argument, Some(operator.precedence));
       out.extend_from_slice(match operator_name {
         OperatorName::PostfixDecrement => b"--",
         OperatorName::PostfixIncrement => b"++",
@@ -893,21 +907,21 @@ fn emit_js_under_operator<'a>(
     }
     Syntax::BlockStmt { body } => {
       out.extend_from_slice(b"{");
-      emit_statements(out, &body);
+      emit_statements(out, body.as_slice());
       out.extend_from_slice(b"}");
     }
     Syntax::BreakStmt { label } => {
       out.extend_from_slice(b"break");
       if let Some(label) = label {
         out.extend_from_slice(b" ");
-        out.extend_from_slice(label.as_slice());
+        out.extend_from_slice(label.as_bytes());
       };
     }
     Syntax::ContinueStmt { label } => {
       out.extend_from_slice(b"continue");
       if let Some(label) = label {
         out.extend_from_slice(b" ");
-        out.extend_from_slice(label.as_slice());
+        out.extend_from_slice(label.as_bytes());
       };
     }
     Syntax::DebuggerStmt {} => {
@@ -921,26 +935,26 @@ fn emit_js_under_operator<'a>(
     } => {
       emit_js_under_operator(
         out,
-        *object,
+        object,
         Some(OPERATORS[&OperatorName::ComputedMemberAccess].precedence),
       );
       if *optional_chaining {
         out.extend_from_slice(b"?.");
       };
       out.extend_from_slice(b"[");
-      emit_js(out, *member);
+      emit_js(out, member);
       out.extend_from_slice(b"]");
     }
     Syntax::ExportDefaultExprStmt { expression } => {
       out.extend_from_slice(b"export default ");
-      emit_js(out, *expression);
+      emit_js(out, expression);
     }
     Syntax::ExportListStmt { names, from } => {
       out.extend_from_slice(b"export");
-      emit_import_or_export_statement_trailer(out, Some(names), *from);
+      emit_import_or_export_statement_trailer(out, Some(names), from.as_ref());
     }
     Syntax::ExpressionStmt { expression } => {
-      emit_js(out, *expression);
+      emit_js(out, expression);
     }
     Syntax::IfStmt {
       test,
@@ -948,71 +962,76 @@ fn emit_js_under_operator<'a>(
       alternate,
     } => {
       out.extend_from_slice(b"if(");
-      emit_js(out, *test);
+      emit_js(out, test);
       out.extend_from_slice(b")");
-      emit_js(out, *consequent);
+      emit_js(out, consequent);
       if let Some(alternate) = alternate {
-        if get_leaf_node_type(*consequent) == LeafNodeType::Block {
+        if get_leaf_node_type(consequent) == LeafNodeType::Block {
           // Do nothing.
         } else {
           out.extend_from_slice(b";");
         };
         out.extend_from_slice(b"else");
-        if let Syntax::BlockStmt { .. } = &alternate.stx {
+        if let Syntax::BlockStmt { .. } = alternate.stx.as_ref() {
           // Do nothing.
         } else {
           out.extend_from_slice(b" ");
         };
-        emit_js(out, *alternate);
+        emit_js(out, alternate);
       };
     }
-    Syntax::ForStmt { header, body } => {
+    Syntax::ForStmt { init, condition, post, body } => {
       out.extend_from_slice(b"for");
-      match header {
-        ForStmtHeader::Three {
-          init,
-          condition,
-          post,
-        } => {
-          out.extend_from_slice(b"(");
-          match init {
-            ForThreeInit::None => {}
-            ForThreeInit::Expression(n) | ForThreeInit::Declaration(n) => emit_js(out, *n),
-          };
-          out.extend_from_slice(b";");
-          if let Some(n) = condition {
-            emit_js(out, *n);
-          };
-          out.extend_from_slice(b";");
-          if let Some(n) = post {
-            emit_js(out, *n);
-          };
-        }
-        ForStmtHeader::InOf {
-          of,
-          lhs,
-          rhs,
-          await_,
-        } => {
-          if *await_ {
-            out.extend_from_slice(b" await");
-          }
-          out.extend_from_slice(b"(");
-          match lhs {
-            ForInOfStmtHeaderLhs::Declaration(n) | ForInOfStmtHeaderLhs::Pattern(n) => {
-              emit_js(out, *n);
-            }
-          };
-          if *of {
-            out.extend_from_slice(b" of ");
-          } else {
-            out.extend_from_slice(b" in ");
-          }
-          emit_js(out, *rhs);
-        }
+      out.extend_from_slice(b"(");
+      match init {
+        ForInit::None => {}
+        ForInit::Expression(n) | ForInit::Declaration(n) => emit_js(out, n),
+      };
+      out.extend_from_slice(b";");
+      if let Some(n) = condition {
+        emit_js(out, n);
+      };
+      out.extend_from_slice(b";");
+      if let Some(n) = post {
+        emit_js(out, n);
       };
       out.extend_from_slice(b")");
-      emit_js(out, *body);
+      emit_js(out, body);
+    }
+    Syntax::ForInStmt { decl_mode, pat, rhs, body } => {
+      out.extend_from_slice(b"for");
+      out.extend_from_slice(b"(");
+      if let Some(decl_mode) = decl_mode {
+        out.extend_from_slice(match decl_mode {
+          VarDeclMode::Const => b"const",
+          VarDeclMode::Let => b"let",
+          VarDeclMode::Var => b"var",
+        });
+      };
+      emit_js(out, pat);
+      out.extend_from_slice(b" in ");
+      emit_js(out, rhs);
+      out.extend_from_slice(b")");
+      emit_js(out, body);
+    }
+    Syntax::ForOfStmt { await_, decl_mode, pat, rhs, body } => {
+      out.extend_from_slice(b"for");
+      if *await_ {
+        out.extend_from_slice(b" await");
+      }
+      out.extend_from_slice(b"(");
+      if let Some(decl_mode) = decl_mode {
+        out.extend_from_slice(match decl_mode {
+          VarDeclMode::Const => b"const",
+          VarDeclMode::Let => b"let",
+          VarDeclMode::Var => b"var",
+        });
+      };
+      emit_js(out, pat);
+      out.extend_from_slice(b" of ");
+      emit_js(out, rhs);
+      out.extend_from_slice(b")");
+      emit_js(out, body);
     }
     Syntax::ImportStmt {
       default,
@@ -1022,7 +1041,7 @@ fn emit_js_under_operator<'a>(
       out.extend_from_slice(b"import");
       if let Some(default) = default {
         out.extend_from_slice(b" ");
-        emit_js(out, *default);
+        emit_js(out, default);
         if names.is_some() {
           out.extend_from_slice(b",");
         } else {
@@ -1036,7 +1055,7 @@ fn emit_js_under_operator<'a>(
       if let Some(value) = value {
         // TODO Omit space if possible.
         out.extend_from_slice(b" ");
-        emit_js(out, *value);
+        emit_js(out, value);
       };
     }
     Syntax::ThisExpr {} => {
@@ -1044,10 +1063,10 @@ fn emit_js_under_operator<'a>(
     }
     Syntax::ThrowStmt { value } => {
       out.extend_from_slice(b"throw ");
-      emit_js(out, *value);
+      emit_js(out, value);
     }
     Syntax::TopLevel { body } => {
-      emit_statements(out, &body);
+      emit_statements(out, body.as_slice());
     }
     Syntax::TryStmt {
       wrapped,
@@ -1055,47 +1074,47 @@ fn emit_js_under_operator<'a>(
       finally,
     } => {
       out.extend_from_slice(b"try");
-      emit_js(out, *wrapped);
+      emit_js(out, wrapped);
       if let Some(c) = catch {
-        emit_js(out, *c);
+        emit_js(out, c);
       }
       if let Some(f) = finally {
         out.extend_from_slice(b"finally");
-        emit_js(out, *f);
+        emit_js(out, f);
       };
     }
     Syntax::WhileStmt { condition, body } => {
       out.extend_from_slice(b"while(");
-      emit_js(out, *condition);
+      emit_js(out, condition);
       out.extend_from_slice(b")");
-      emit_js(out, *body);
+      emit_js(out, body);
     }
     Syntax::DoWhileStmt { condition, body } => {
       out.extend_from_slice(b"do");
-      if let Syntax::BlockStmt { .. } = &body.stx {
+      if let Syntax::BlockStmt { .. } = body.stx.as_ref() {
         // Do nothing.
       } else {
         out.extend_from_slice(b" ");
       };
-      emit_js(out, *body);
-      if get_leaf_node_type(*body) == LeafNodeType::Block {
+      emit_js(out, body);
+      if get_leaf_node_type(body) == LeafNodeType::Block {
         // Do nothing.
       } else {
         out.extend_from_slice(b";");
       };
       out.extend_from_slice(b"while(");
-      emit_js(out, *condition);
+      emit_js(out, condition);
       out.extend_from_slice(b")");
     }
     Syntax::SwitchStmt { test, branches } => {
       out.extend_from_slice(b"switch(");
-      emit_js(out, *test);
+      emit_js(out, test);
       out.extend_from_slice(b"){");
       for (i, b) in branches.iter().enumerate() {
         if i > 0 {
           out.extend_from_slice(b";");
         };
-        emit_js(out, *b);
+        emit_js(out, b);
       }
       out.extend_from_slice(b"}");
     }
@@ -1103,24 +1122,24 @@ fn emit_js_under_operator<'a>(
       out.extend_from_slice(b"catch");
       if let Some(p) = parameter {
         out.extend_from_slice(b"(");
-        emit_js(out, *p);
+        emit_js(out, p);
         out.extend_from_slice(b")");
       }
-      emit_js(out, *body);
+      emit_js(out, body);
     }
     Syntax::SwitchBranch { case, body } => {
       match case {
         Some(case) => {
           // TODO Omit space if possible.
           out.extend_from_slice(b"case ");
-          emit_js(out, *case);
+          emit_js(out, case);
           out.extend_from_slice(b":");
         }
         None => {
           out.extend_from_slice(b"default:");
         }
       }
-      emit_statements(out, &body);
+      emit_statements(out, body.as_slice());
     }
     Syntax::ObjectPatternProperty {
       key,
@@ -1130,21 +1149,21 @@ fn emit_js_under_operator<'a>(
     } => {
       match key {
         ClassOrObjectMemberKey::Direct(name) => {
-          out.extend_from_slice(name.as_slice());
+          out.extend_from_slice(name.as_bytes());
         }
         ClassOrObjectMemberKey::Computed(expr) => {
           out.extend_from_slice(b"[");
-          emit_js(out, *expr);
+          emit_js(out, expr);
           out.extend_from_slice(b"]");
         }
       };
       if !*shorthand {
         out.extend_from_slice(b":");
-        emit_js(out, *target);
+        emit_js(out, target);
       };
       if let Some(v) = default_value {
         out.extend_from_slice(b"=");
-        emit_js(out, *v);
+        emit_js(out, v);
       };
     }
     Syntax::ObjectMember { typ } => {
@@ -1153,11 +1172,11 @@ fn emit_js_under_operator<'a>(
           emit_class_or_object_member(out, key, value, b":");
         }
         ObjectMemberType::Shorthand { identifier } => {
-          emit_js(out, *identifier);
+          emit_js(out, identifier);
         }
         ObjectMemberType::Rest { value } => {
           out.extend_from_slice(b"...");
-          emit_js(out, *value);
+          emit_js(out, value);
         }
       };
     }
@@ -1182,14 +1201,14 @@ fn emit_js_under_operator<'a>(
       if must_parenthesise {
         out.extend_from_slice(b"(");
       };
-      emit_js_under_operator(out, *left, Some(operator.precedence));
+      emit_js_under_operator(out, left, Some(operator.precedence));
       out.extend_from_slice(
         BINARY_OPERATOR_SYNTAX
           .get(operator_name)
           .unwrap()
           .as_bytes(),
       );
-      out.extend_from_slice(right.as_slice());
+      out.extend_from_slice(right.as_bytes());
       if must_parenthesise {
         out.extend_from_slice(b")");
       };
@@ -1205,26 +1224,25 @@ fn emit_js_under_operator<'a>(
       if *parenthesised {
         out.extend_from_slice(b"(");
       }
-      emit_class(out, name, extends, members);
+      emit_class(out, name.as_ref(), extends.as_ref(), members.as_slice());
       // TODO Omit parentheses if possible.
       if *parenthesised {
         out.extend_from_slice(b")");
       }
     }
     Syntax::LabelStmt { name, statement } => {
-      out.extend_from_slice(name.as_slice());
+      out.extend_from_slice(name.as_bytes());
       out.extend_from_slice(b":");
-      emit_js(out, *statement);
+      emit_js(out, statement);
     }
     Syntax::CallArg { spread, value } => {
       if *spread {
         out.extend_from_slice(b"...");
       }
-      emit_js(out, *value);
+      emit_js(out, value);
     }
     Syntax::SuperExpr {} => {
       out.extend_from_slice(b"super");
     }
-    Syntax::_TakenNode {} => unreachable!(),
   };
 }

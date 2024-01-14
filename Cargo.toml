@@ -1,9 +1,9 @@
 [workspace]
 members = [
-    "bench/minify-js",
-    "cli",
-    "nodejs",
-    "rust",
+  "bench/minify-js",
+  "cli",
+  "nodejs",
+  "rust",
 ]
 
 [profile.release]
