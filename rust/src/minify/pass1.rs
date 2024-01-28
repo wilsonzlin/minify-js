@@ -376,7 +376,7 @@ impl<'a, 'b> Visitor<'a> for Pass1<'a, 'b> {
 
         match (cons_ok, alt_ok) {
           (true, None) => {
-            let closure_scope = scope.find_self_or_ancestor(|t| t.is_closure()).unwrap();
+            let closure_scope = scope.find_self_or_ancestor(|t| t.is_closure()).unwrap_or(scope);
             let cons_expr = process_if_branch(self.ctx.session, scope, consequent);
             let min_scope = self
               .ctx
@@ -404,7 +404,7 @@ impl<'a, 'b> Visitor<'a> for Pass1<'a, 'b> {
             }
           }
           (true, Some(true)) => {
-            let closure_scope = scope.find_self_or_ancestor(|t| t.is_closure()).unwrap();
+            let closure_scope = scope.find_self_or_ancestor(|t| t.is_closure()).unwrap_or(scope);
             let cons_expr = process_if_branch(self.ctx.session, scope, consequent);
             let alt_expr = process_if_branch(self.ctx.session, scope, alternate.as_mut().unwrap());
             let min_scope = self
