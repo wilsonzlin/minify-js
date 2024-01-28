@@ -419,7 +419,7 @@ impl<'a, 'b> Visitor<'a> for Pass1<'a, 'b> {
               .hoisted_vars
               .extend_from_slice(&alt_expr.hoisted_vars);
             // Due to normalisation, it's not possible for an `if-else` to return in either branch, because one branch would've been unwrapped.
-            assert!(cons_expr.returns && alt_expr.returns);
+            assert!(!(cons_expr.returns && alt_expr.returns));
             let test = test.take(self.ctx.session);
             let consequent = cons_expr.expression;
             let alternate = alt_expr.expression;
